@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#eff6ff" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="format-detection" content="telephone=no" />
+    
+    <title>강아지 사천성</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=DotGothic16&display=swap');
+      
+      :root {
+        --safe-top: env(safe-area-inset-top, 0px);
+        --safe-bottom: env(safe-area-inset-bottom, 0px);
+      }
+
+      body {
+        font-family: 'DotGothic16', sans-serif;
+        user-select: none;
+        -webkit-user-select: none; /* Safari/Chrome */
+        -webkit-touch-callout: none; /* Disable long-press menu */
+        -webkit-text-size-adjust: none; /* Disable font scaling */
+        overscroll-behavior: none; /* Disable pull-to-refresh/rubber-banding */
+        overflow: hidden;
+        image-rendering: pixelated;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: none; /* Disable browser gestures globally for game */
+      }
+
+      /* --- Retro Backgrounds --- */
+      
+      /* Diagonal Stripes */
+      .bg-retro-stripe {
+        background-color: #eff6ff; 
+        background-image: repeating-linear-gradient(
+          45deg,
+          #dbeafe,
+          #dbeafe 10px,
+          #eff6ff 10px,
+          #eff6ff 20px
+        );
+      }
+
+      /* Blue Grid Pattern */
+      .bg-retro-grid {
+        background-color: #f0f9ff;
+        background-image: 
+          linear-gradient(#bfdbfe 1px, transparent 1px),
+          linear-gradient(90deg, #bfdbfe 1px, transparent 1px);
+        background-size: 20px 20px;
+        box-shadow: inset 0 0 20px rgba(59, 130, 246, 0.2);
+      }
+
+      /* CRT Scanline Overlay */
+      .scanlines {
+        position: relative;
+        overflow: hidden;
+      }
+      .scanlines::after {
+        content: " ";
+        display: block;
+        position: absolute;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        right: 0;
+        background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%);
+        background-size: 100% 4px;
+        z-index: 50;
+        pointer-events: none;
+      }
+
+      /* --- Retro UI Elements --- */
+
+      .retro-box {
+        background-color: #fff;
+        border: 4px solid #1e3a8a; 
+        box-shadow: 4px 4px 0px rgba(0,0,0,0.2);
+      }
+
+      .btn-pixel {
+        position: relative;
+        border: 4px solid #1e3a8a;
+        background-color: #3b82f6;
+        color: white;
+        box-shadow: inset -4px -4px 0px rgba(0,0,0,0.2), inset 4px 4px 0px rgba(255,255,255,0.3);
+      }
+      .btn-pixel:active {
+        box-shadow: inset 4px 4px 0px rgba(0,0,0,0.2);
+        transform: translate(2px, 2px);
+      }
+      
+      .btn-pixel.yellow { background-color: #eab308; border-color: #713f12; }
+      .btn-pixel.pink { background-color: #ec4899; border-color: #831843; }
+      
+      @keyframes pixel-bounce {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-4px); }
+      }
+      .animate-pixel-bounce {
+        animation: pixel-bounce 1s step-end infinite;
+      }
+
+      @keyframes match-pop {
+        0% { transform: scale(1); filter: brightness(100%); }
+        50% { transform: scale(1.25); filter: brightness(150%); box-shadow: 0 0 20px rgba(251, 191, 36, 0.8); z-index: 50; }
+        100% { transform: scale(0); opacity: 0; }
+      }
+      .animate-match-pop {
+        animation: match-pop 0.3s ease-out forwards;
+      }
+
+      @keyframes float-up {
+        0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+        20% { transform: translate(-50%, -100%) scale(1.2); opacity: 1; }
+        80% { transform: translate(-50%, -180%) scale(1); opacity: 1; }
+        100% { transform: translate(-50%, -200%) scale(0.8); opacity: 0; }
+      }
+      .animate-float-up {
+        animation: float-up 1.2s ease-out forwards;
+      }
+
+      @keyframes score-bump {
+        0% { transform: scale(1); }
+        30% { transform: scale(1.5); color: #fbbf24; text-shadow: 2px 2px 0 #b45309; }
+        100% { transform: scale(1); }
+      }
+      .animate-score-bump {
+        animation: score-bump 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+      }
+      
+      @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        25% { transform: translateX(-4px); }
+        75% { transform: translateX(4px); }
+      }
+      .animate-shake {
+        animation: shake 0.2s ease-in-out 2;
+      }
+
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "react": "https://esm.sh/react@^19.2.4",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.3"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body class="bg-retro-stripe text-slate-900 h-screen w-screen overflow-hidden">
+    <div id="root" class="h-full w-full scanlines"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
