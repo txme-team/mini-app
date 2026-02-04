@@ -11,7 +11,7 @@ class SoundManager {
     // Intentionally empty.
   }
 
-  // Call this on the FIRST user interaction (e.g. Game Start button)
+  // Call this on the FIRST user interaction (e.g. Game Start button or Touch)
   // This is critical for iOS Safari to unlock audio.
   init() {
     if (!this.ctx) {
@@ -25,32 +25,38 @@ class SoundManager {
       }
     }
 
-    if (this.ctx) {
-      // 1. Resume context if suspended
-      if (this.ctx.state === 'suspended') {
-        this.ctx.resume().catch(e => console.error("Audio resume failed", e));
-      }
+    this.resume();
+  }
 
-      // 2. iOS Unlock Trick: Play a short silent buffer
-      // This forces the audio hardware to wake up immediately within the click event.
-      try {
-        const buffer = this.ctx.createBuffer(1, 1, 22050);
-        const source = this.ctx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(this.ctx.destination);
-        source.start(0);
-      } catch (e) {
-        console.error("iOS Audio Unlock failed", e);
-      }
+  // Helper to force resume context (iOS Safari fix)
+  resume() {
+    if (this.ctx) {
+        // 1. Resume context if suspended
+        if (this.ctx.state === 'suspended') {
+            this.ctx.resume().catch(e => {});
+        }
+
+        // 2. iOS Unlock Trick: Play a short silent buffer
+        // This forces the audio hardware to wake up immediately within the interaction event.
+        try {
+            const buffer = this.ctx.createBuffer(1, 1, 22050);
+            const source = this.ctx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(this.ctx.destination);
+            source.start(0);
+        } catch (e) {
+            // Ignore errors here
+        }
     }
   }
 
   private ensureContext() {
-    // Just a fallback, but init() should be called explicitly first.
+    // Just a fallback, but init() should be called explicitly first via user interaction.
     if (!this.ctx) {
         this.init();
-    } else if (this.ctx.state === 'suspended') {
-        this.ctx.resume().catch(() => {});
+    } else {
+        // Always try to resume if suspended
+        this.resume();
     }
   }
 

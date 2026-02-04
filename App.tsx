@@ -35,7 +35,7 @@ import {
 
 // Separated Game Component to use Auth Context
 const GameApp: React.FC = () => {
-  const { user } = useAuth(); // Get logged in user
+  const { user, logout } = useAuth(); // Get logged in user and logout function
   
   const [gameState, setGameState] = useState<GameState>({
     level: 1,
@@ -82,6 +82,26 @@ const GameApp: React.FC = () => {
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  // --- iOS Audio Unlocker ---
+  // Attaches a one-time listener to the window to unlock audio on the very first touch anywhere.
+  useEffect(() => {
+    const unlockAudio = () => {
+      soundManager.init();
+      // Remove after first interaction
+      window.removeEventListener('touchstart', unlockAudio);
+      window.removeEventListener('click', unlockAudio);
+    };
+
+    // 'touchstart' is more reliable than 'click' on iOS for audio unlocking
+    window.addEventListener('touchstart', unlockAudio);
+    window.addEventListener('click', unlockAudio);
+
+    return () => {
+      window.removeEventListener('touchstart', unlockAudio);
+      window.removeEventListener('click', unlockAudio);
+    };
   }, []);
 
   const startLevel = useCallback((level: number) => {
