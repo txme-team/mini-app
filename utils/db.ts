@@ -20,19 +20,23 @@ export interface RankingEntry {
 // 함수로 감싸거나 동적으로 접근하면 빌드 도구가 이를 인식하지 못해 값이 undefined가 됩니다.
 // 따라서 아래와 같이 직접 접근해야 합니다.
 
-const SUPABASE_URL = 
+const RAW_SUPABASE_URL = 
   // @ts-ignore
   (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || 
   // @ts-ignore
   (typeof process !== 'undefined' && process.env && process.env.REACT_APP_SUPABASE_URL) || 
   '';
 
-const SUPABASE_KEY = 
+const RAW_SUPABASE_KEY = 
   // @ts-ignore
   (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) || 
   // @ts-ignore
   (typeof process !== 'undefined' && process.env && process.env.REACT_APP_SUPABASE_ANON_KEY) || 
   '';
+
+// Clean up keys (remove accidental quotes or whitespace)
+const SUPABASE_URL = RAW_SUPABASE_URL.replace(/['"]/g, '').trim();
+const SUPABASE_KEY = RAW_SUPABASE_KEY.replace(/['"]/g, '').trim();
 
 // --- Local Storage Key ---
 const LOCAL_DB_KEY = 'shisen_sho_local_data_v3';
@@ -77,21 +81,29 @@ class GameDB {
   constructor() {
     this.userId = getDeviceId();
     
-    // 디버깅을 위한 로그 (배포 환경에서 확인 가능)
-    // 실제 키 값은 보안상 출력하지 않고 길이만 확인합니다.
     const hasUrl = !!SUPABASE_URL && SUPABASE_URL.length > 0;
     const hasKey = !!SUPABASE_KEY && SUPABASE_KEY.length > 20;
 
     if (hasUrl && hasKey) {
-      console.log("Supabase Client Connecting..."); 
+      console.log("Supabase Client Connecting to 'ddp' Schema..."); 
       this.client = createClient(SUPABASE_URL, SUPABASE_KEY, {
-        db: { schema: 'ddp' }
+        db: { schema: 'ddp' }, // [복구] 요청하신 ddp 스키마 설정 복구
+        auth: {
+            persistSession: false, // [중요] 기기 ID 기반이므로 Auth 세션 저장 비활성화 (RLS 충돌 방지)
+            autoRefreshToken: false,
+            detectSessionInUrl: false
+        }
       });
     } else {
-      console.warn(`Supabase Connection Failed. Env Vars Missing. URL: ${hasUrl}, KEY: ${hasKey}`);
-      console.warn("Falling back to Local Storage Mode.");
+      console.warn(`Supabase Connection Failed. Env Vars Missing or Invalid.`);
+      console.warn(`URL Length: ${SUPABASE_URL.length}, Key Length: ${SUPABASE_KEY.length}`);
       this.client = null;
     }
+  }
+
+  // Check if connected
+  public isConnected(): boolean {
+    return !!this.client;
   }
 
   // --- Local Storage Helpers ---
@@ -125,7 +137,6 @@ class GameDB {
 
     // 2. Supabase
     try {
-      // Use maybeSingle() to handle 0 rows gracefully without error
       const { data, error } = await this.client
         .from('profiles')
         .select('id, username, high_score')
@@ -134,12 +145,11 @@ class GameDB {
 
       if (error) {
          console.warn("Supabase getUserProfile error:", error.code, error.message);
-         throw error;
       }
       
       // If no user found, create one immediately (Upsert pattern)
       if (!data) {
-        console.log("User not found, initializing profile...");
+        console.log("User not found on server, initializing profile...");
         const { error: upsertError } = await this.client
             .from('profiles')
             .upsert({
@@ -151,8 +161,7 @@ class GameDB {
             });
 
         if (upsertError) {
-             console.error("Failed to initialize profile:", upsertError);
-             // Even if server fails, return default to allow app to run
+             console.error("Failed to initialize profile on server:", upsertError);
              return { id: this.userId, nickname: '', highScore: 0 };
         }
         return { id: this.userId, nickname: '', highScore: 0 };
@@ -181,6 +190,7 @@ class GameDB {
     // 2. Supabase
     if (this.client) {
       try {
+        console.log("Attempting to save profile to Supabase...");
         // Upsert handles both insert and update
         const { error } = await this.client
           .from('profiles')
@@ -193,10 +203,13 @@ class GameDB {
           });
 
         if (error) {
-             console.error("Failed to update profile:", error);
+             console.error("Failed to update profile:", error.message, error.details);
+             alert(`서버 저장 실패 (RLS 권한 확인 필요): ${error.message}`);
+        } else {
+             console.log("Profile saved successfully.");
         }
-      } catch (e) {
-        console.error("Failed to update profile:", e);
+      } catch (e: any) {
+        console.error("Failed to update profile (Exception):", e);
       }
     }
   }
@@ -211,8 +224,6 @@ class GameDB {
 
     if (this.client) {
       try {
-        // Fetch current server data to ensure we don't overwrite a higher score from another device (edge case)
-        // or simply to get the current state.
         const { data: existing } = await this.client
           .from('profiles')
           .select('high_score, games_played')
@@ -223,14 +234,13 @@ class GameDB {
         const oldGames = existing?.games_played || 0;
         const newHighScore = Math.max(oldScore, currentScore);
 
-        // Upsert ensures record exists
         const { error } = await this.client
             .from('profiles')
             .upsert({
               id: this.userId,
               high_score: newHighScore,
               games_played: oldGames + 1,
-              username: local.username || '', // Persist local username if not on server
+              username: local.username || '', 
               updated_at: new Date().toISOString()
             });
 
