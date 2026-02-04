@@ -16,26 +16,23 @@ export interface RankingEntry {
 }
 
 // --- Supabase Config ---
-// 환경 변수 로딩 헬퍼 함수 (Vite 및 CRA/Webpack 호환)
-const getEnv = (viteKey: string, reactKey: string): string => {
-  // 1. Vite (import.meta.env) 확인
-  // @ts-ignore
-  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[viteKey]) {
-    // @ts-ignore
-    return import.meta.env[viteKey];
-  }
-  // 2. CRA/Node (process.env) 확인
-  // @ts-ignore
-  if (typeof process !== 'undefined' && process.env && process.env[reactKey]) {
-    // @ts-ignore
-    return process.env[reactKey];
-  }
-  return '';
-};
+// 중요: Vite는 빌드 시점에 'import.meta.env.VITE_...' 문자열을 정적으로 찾아 교체합니다.
+// 함수로 감싸거나 동적으로 접근하면 빌드 도구가 이를 인식하지 못해 값이 undefined가 됩니다.
+// 따라서 아래와 같이 직접 접근해야 합니다.
 
-// 키 값을 코드에서 제거하고 환경 변수에서 불러옵니다.
-const SUPABASE_URL = getEnv('VITE_SUPABASE_URL', 'REACT_APP_SUPABASE_URL');
-const SUPABASE_KEY = getEnv('VITE_SUPABASE_ANON_KEY', 'REACT_APP_SUPABASE_ANON_KEY');
+const SUPABASE_URL = 
+  // @ts-ignore
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || 
+  // @ts-ignore
+  (typeof process !== 'undefined' && process.env && process.env.REACT_APP_SUPABASE_URL) || 
+  '';
+
+const SUPABASE_KEY = 
+  // @ts-ignore
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) || 
+  // @ts-ignore
+  (typeof process !== 'undefined' && process.env && process.env.REACT_APP_SUPABASE_ANON_KEY) || 
+  '';
 
 // --- Local Storage Key ---
 const LOCAL_DB_KEY = 'shisen_sho_local_data_v3';
@@ -65,13 +62,20 @@ class GameDB {
 
   constructor() {
     this.userId = getDeviceId();
-    // 유효한 키가 있을 때만 Supabase 클라이언트 생성
-    if (SUPABASE_URL && SUPABASE_KEY && SUPABASE_KEY.length > 20) {
+    
+    // 디버깅을 위한 로그 (배포 환경에서 확인 가능)
+    // 실제 키 값은 보안상 출력하지 않고 길이만 확인합니다.
+    const hasUrl = !!SUPABASE_URL && SUPABASE_URL.length > 0;
+    const hasKey = !!SUPABASE_KEY && SUPABASE_KEY.length > 20;
+
+    if (hasUrl && hasKey) {
+      console.log("Supabase Client Connecting..."); 
       this.client = createClient(SUPABASE_URL, SUPABASE_KEY, {
         db: { schema: 'ddp' }
       });
     } else {
-      console.log("Supabase Key not found. Running in Local Storage Mode.");
+      console.warn(`Supabase Connection Failed. Env Vars Missing. URL: ${hasUrl}, KEY: ${hasKey}`);
+      console.warn("Falling back to Local Storage Mode.");
       this.client = null;
     }
   }
