@@ -9,17 +9,13 @@ export interface UserRecord {
 }
 
 export interface RankingEntry {
-  rank: number; // Explicit rank number
+  rank: number;
   name: string;
   score: number;
   isUser: boolean;
 }
 
 // --- Supabase Config ---
-// 중요: Vite는 빌드 시점에 'import.meta.env.VITE_...' 문자열을 정적으로 찾아 교체합니다.
-// 함수로 감싸거나 동적으로 접근하면 빌드 도구가 이를 인식하지 못해 값이 undefined가 됩니다.
-// 따라서 아래와 같이 직접 접근해야 합니다.
-
 const RAW_SUPABASE_URL = 
   // @ts-ignore
   (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_URL) || 
@@ -34,7 +30,6 @@ const RAW_SUPABASE_KEY =
   (typeof process !== 'undefined' && process.env && process.env.REACT_APP_SUPABASE_ANON_KEY) || 
   '';
 
-// Clean up keys (remove accidental quotes or whitespace)
 const SUPABASE_URL = RAW_SUPABASE_URL.replace(/['"]/g, '').trim();
 const SUPABASE_KEY = RAW_SUPABASE_KEY.replace(/['"]/g, '').trim();
 
@@ -42,8 +37,6 @@ const SUPABASE_KEY = RAW_SUPABASE_KEY.replace(/['"]/g, '').trim();
 const LOCAL_DB_KEY = 'shisen_sho_local_data_v3';
 
 // --- Helpers ---
-
-// UUID Generator for compatibility with UUID columns in DB
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
     const r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
@@ -53,9 +46,6 @@ const generateUUID = () => {
 
 const getDeviceId = (): string => {
   let id = localStorage.getItem('shisen_device_id');
-  
-  // Basic validation: if it's not a UUID-like string, regenerate it.
-  // This ensures we don't send "user-xyz" to a UUID column which causes insert failures.
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   
   if (!id || !uuidRegex.test(id)) {
@@ -65,7 +55,7 @@ const getDeviceId = (): string => {
   return id;
 };
 
-// Mock data for local fallback
+// Mock data
 const MOCK_RANKERS = [
   { name: 'DOGGY', score: 25000 },
   { name: 'POODLE', score: 18000 },
@@ -87,21 +77,19 @@ class GameDB {
     if (hasUrl && hasKey) {
       console.log("Supabase Client Connecting to 'ddp' Schema..."); 
       this.client = createClient(SUPABASE_URL, SUPABASE_KEY, {
-        db: { schema: 'ddp' }, // [복구] 요청하신 ddp 스키마 설정 복구
+        db: { schema: 'ddp' },
         auth: {
-            persistSession: false, // [중요] 기기 ID 기반이므로 Auth 세션 저장 비활성화 (RLS 충돌 방지)
+            persistSession: false,
             autoRefreshToken: false,
             detectSessionInUrl: false
         }
       });
     } else {
-      console.warn(`Supabase Connection Failed. Env Vars Missing or Invalid.`);
-      console.warn(`URL Length: ${SUPABASE_URL.length}, Key Length: ${SUPABASE_KEY.length}`);
+      console.warn("Supabase Config Missing. Running in Offline Mode.");
       this.client = null;
     }
   }
 
-  // Check if connected
   public isConnected(): boolean {
     return !!this.client;
   }
@@ -123,11 +111,12 @@ class GameDB {
 
   // --- Public API ---
 
-  // Fetches full user stats including nickname
+  // Fetches full user stats - Offline First Strategy
   async getUserProfile(): Promise<{ id: string; nickname: string; highScore: number }> {
-    // 1. Local Fallback
+    const local = this.getLocalData();
+
+    // 1. If no client, return local immediately
     if (!this.client) {
-      const local = this.getLocalData();
       return { 
         id: this.userId, 
         nickname: local.username || '', 
@@ -135,7 +124,7 @@ class GameDB {
       };
     }
 
-    // 2. Supabase
+    // 2. Try Supabase Sync
     try {
       const { data, error } = await this.client
         .from('profiles')
@@ -143,55 +132,60 @@ class GameDB {
         .eq('id', this.userId)
         .maybeSingle();
 
-      if (error) {
-         console.warn("Supabase getUserProfile error:", error.code, error.message);
+      if (error) throw error;
+      
+      // If user exists on server, use that data and update local
+      if (data) {
+          // Sync server data to local
+          const merged = { ...local, username: data.username || local.username, high_score: Math.max(local.high_score, data.high_score || 0) };
+          this.saveLocalData(merged);
+          
+          return { 
+            id: this.userId, 
+            nickname: data.username || '', 
+            highScore: data.high_score || 0
+          };
       }
       
-      // If no user found, create one immediately (Upsert pattern)
-      if (!data) {
-        console.log("User not found on server, initializing profile...");
-        const { error: upsertError } = await this.client
-            .from('profiles')
-            .upsert({
-                id: this.userId,
-                high_score: 0,
-                games_played: 0,
-                username: '', // Empty initially
-                updated_at: new Date().toISOString()
-            });
+      // If not found on server, try to create it (Upsert)
+      // If this fails due to RLS, we catch it below and just return local
+      const { error: upsertError } = await this.client
+        .from('profiles')
+        .upsert({
+            id: this.userId,
+            high_score: local.high_score,
+            games_played: local.games_played,
+            username: local.username || '',
+            updated_at: new Date().toISOString()
+        });
 
-        if (upsertError) {
-             console.error("Failed to initialize profile on server:", upsertError);
-             return { id: this.userId, nickname: '', highScore: 0 };
-        }
-        return { id: this.userId, nickname: '', highScore: 0 };
+      if (upsertError) {
+          console.warn("Server init failed (RLS blocking?), using local:", upsertError.message);
       }
-      
+
+      // Return local data regardless of server success/fail
       return { 
         id: this.userId, 
-        nickname: data.username || '', 
-        highScore: data.high_score || 0
+        nickname: local.username || '', 
+        highScore: local.high_score 
       };
 
     } catch (e) {
-      console.error("Supabase load failed, falling back to local:", e);
-      const local = this.getLocalData();
+      console.warn("Supabase unavailable, using local profile:", e);
       return { id: this.userId, nickname: local.username || '', highScore: local.high_score };
     }
   }
 
-  // Update Nickname
+  // Update Nickname - Fire and Forget for Server
   async updateProfile(nickname: string): Promise<void> {
-    // 1. Local
+    // 1. Update Local immediately (UI reflects this)
     const local = this.getLocalData();
     local.username = nickname;
     this.saveLocalData(local);
 
-    // 2. Supabase
+    // 2. Try Background Sync
     if (this.client) {
       try {
-        console.log("Attempting to save profile to Supabase...");
-        // Upsert handles both insert and update
         const { error } = await this.client
           .from('profiles')
           .upsert({ 
@@ -203,17 +197,16 @@ class GameDB {
           });
 
         if (error) {
-             console.error("Failed to update profile:", error.message, error.details);
-             alert(`서버 저장 실패 (RLS 권한 확인 필요): ${error.message}`);
-        } else {
-             console.log("Profile saved successfully.");
+             console.warn("Background Sync Failed (Check RLS):", error.message);
+             // No alert() - don't disturb the player
         }
-      } catch (e: any) {
-        console.error("Failed to update profile (Exception):", e);
+      } catch (e) {
+        console.warn("Background Sync Error:", e);
       }
     }
   }
 
+  // Save Score - Fire and Forget for Server
   async saveScore(currentScore: number): Promise<void> {
     const local = this.getLocalData();
     local.games_played += 1;
@@ -224,6 +217,7 @@ class GameDB {
 
     if (this.client) {
       try {
+        // Fetch current server data to compare (Optimistic)
         const { data: existing } = await this.client
           .from('profiles')
           .select('high_score, games_played')
@@ -244,33 +238,33 @@ class GameDB {
               updated_at: new Date().toISOString()
             });
 
-        if (error) {
-            console.error("Failed to save score to server:", error);
-        }
+        if (error) console.warn("Score Sync Failed:", error.message);
       } catch (e) {
-        console.error("Failed to save score to server:", e);
+        console.warn("Score Sync Error:", e);
       }
     }
   }
 
+  // Get Rankings - Fallback to Local/Mock if server fails
   async getRankings(currentScore: number): Promise<RankingEntry[]> {
+    // Helper to format result
+    const formatResult = (list: any[], userRank: number, userScore: number) => {
+        // ... logic shared with server response
+        return list; 
+    };
+
     if (!this.client) {
-      const all = [...MOCK_RANKERS, { name: 'YOU', score: currentScore }];
-      all.sort((a, b) => b.score - a.score);
-      return all.slice(0, 5).map((r, i) => ({
-        rank: i + 1,
-        name: r.name,
-        score: r.score,
-        isUser: r.name === 'YOU'
-      }));
+      return this.getMockRankings(currentScore);
     }
 
     try {
-      const { data: topPlayers } = await this.client
+      const { data: topPlayers, error } = await this.client
         .from('profiles')
         .select('id, username, high_score')
         .order('high_score', { ascending: false })
         .limit(3);
+
+      if (error) throw error;
 
       const rankingList: RankingEntry[] = [];
       
@@ -304,9 +298,20 @@ class GameDB {
       return finalList;
 
     } catch (e) {
-      console.error("Failed to get rankings:", e);
-      return [];
+      console.warn("Ranking Load Failed, using Mock:", e);
+      return this.getMockRankings(currentScore);
     }
+  }
+
+  private getMockRankings(currentScore: number): RankingEntry[] {
+      const all = [...MOCK_RANKERS, { name: 'YOU', score: currentScore }];
+      all.sort((a, b) => b.score - a.score);
+      return all.slice(0, 5).map((r, i) => ({
+        rank: i + 1,
+        name: r.name,
+        score: r.score,
+        isUser: r.name === 'YOU'
+      }));
   }
 }
 
