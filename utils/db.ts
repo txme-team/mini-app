@@ -16,8 +16,26 @@ export interface RankingEntry {
 }
 
 // --- Supabase Config ---
-const SUPABASE_URL = 'https://nxpuaxxdjkupktlyrtje.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54cHVheHhkamt1cGt0bHlydGplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwNDE4MjAsImV4cCI6MjA4NTYxNzgyMH0.ojAH2ZcOeVrcFMCoN9C7zGcM3WvuexcjqnJtA23RauY';
+// 환경 변수 로딩 헬퍼 함수 (Vite 및 CRA/Webpack 호환)
+const getEnv = (viteKey: string, reactKey: string): string => {
+  // 1. Vite (import.meta.env) 확인
+  // @ts-ignore
+  if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env[viteKey]) {
+    // @ts-ignore
+    return import.meta.env[viteKey];
+  }
+  // 2. CRA/Node (process.env) 확인
+  // @ts-ignore
+  if (typeof process !== 'undefined' && process.env && process.env[reactKey]) {
+    // @ts-ignore
+    return process.env[reactKey];
+  }
+  return '';
+};
+
+// 키 값을 코드에서 제거하고 환경 변수에서 불러옵니다.
+const SUPABASE_URL = getEnv('VITE_SUPABASE_URL', 'REACT_APP_SUPABASE_URL');
+const SUPABASE_KEY = getEnv('VITE_SUPABASE_ANON_KEY', 'REACT_APP_SUPABASE_ANON_KEY');
 
 // --- Local Storage Key ---
 const LOCAL_DB_KEY = 'shisen_sho_local_data_v3';
@@ -49,7 +67,9 @@ class GameDB {
     this.userId = getDeviceId();
     // 유효한 키가 있을 때만 Supabase 클라이언트 생성
     if (SUPABASE_URL && SUPABASE_KEY && SUPABASE_KEY.length > 20) {
-      this.client = createClient(SUPABASE_URL, SUPABASE_KEY);
+      this.client = createClient(SUPABASE_URL, SUPABASE_KEY, {
+        db: { schema: 'ddp' }
+      });
     } else {
       console.log("Supabase Key not found. Running in Local Storage Mode.");
       this.client = null;
@@ -87,9 +107,10 @@ class GameDB {
 
     // 2. Supabase
     try {
+      // 명시적으로 필요한 컬럼만 선택
       const { data, error } = await this.client
         .from('profiles')
-        .select('*')
+        .select('id, username, high_score')
         .eq('id', this.userId)
         .single();
 
