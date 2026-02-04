@@ -118,20 +118,31 @@ class GameDB {
         .eq('id', this.userId)
         .single();
 
-      if (error && error.code === 'PGRST116') {
-        // Create new if not exists
-        const { error: insertError } = await this.client
-          .from('profiles')
-          .insert([
-            {
-              id: this.userId,
-              high_score: 0,
-              username: '' // Empty initially
+      if (error) {
+         if (error.code === 'PGRST116') {
+            // Data not found -> Create new
+            // [수정] 필수 필드들을 모두 포함하여 INSERT 시도
+            const { error: insertError } = await this.client
+              .from('profiles')
+              .insert([
+                {
+                  id: this.userId,
+                  high_score: 0,
+                  games_played: 0,
+                  username: '',
+                  updated_at: new Date()
+                }
+              ]);
+            if (insertError) {
+                console.error("Failed to create profile:", insertError);
+                // INSERT 실패 시 로컬 모드로 동작하도록 에러를 던지지 않음
             }
-          ]);
-        if (insertError) throw insertError;
-        return { id: this.userId, nickname: '', highScore: 0 };
-      } else if (data) {
+            return { id: this.userId, nickname: '', highScore: 0 };
+         }
+         console.warn("Supabase load warning:", error.message);
+      } 
+      
+      if (data) {
         return { 
           id: this.userId, 
           nickname: data.username || '', 
@@ -140,27 +151,41 @@ class GameDB {
       }
     } catch (e) {
       console.error("Supabase load failed, falling back to local:", e);
-      const local = this.getLocalData();
-      return { id: this.userId, nickname: local.username || '', highScore: local.high_score };
     }
-
-    return { id: this.userId, nickname: '', highScore: 0 };
+    
+    // Fallback if anything fails
+    const local = this.getLocalData();
+    return { id: this.userId, nickname: local.username || '', highScore: local.high_score };
   }
 
-  // Update Nickname
+  // Update Nickname (Login Logic)
   async updateProfile(nickname: string): Promise<void> {
-    // 1. Local
+    // 1. Local Save
     const local = this.getLocalData();
     local.username = nickname;
     this.saveLocalData(local);
 
-    // 2. Supabase
+    // 2. Supabase Save
     if (this.client) {
       try {
-        await this.client
+        // [수정] UPDATE를 먼저 시도하고, 업데이트된 행이 없으면 INSERT 수행 (Upsert 로직 구현)
+        const { data, error } = await this.client
           .from('profiles')
           .update({ username: nickname, updated_at: new Date() })
-          .eq('id', this.userId);
+          .eq('id', this.userId)
+          .select();
+
+        // 업데이트된 행이 없다면(유저가 존재하지 않는다면) 새로 생성
+        if (!error && (!data || data.length === 0)) {
+           console.log("User not found during login, creating new profile...");
+           await this.client.from('profiles').insert({
+              id: this.userId,
+              username: nickname,
+              high_score: local.high_score || 0,
+              games_played: local.games_played || 0,
+              updated_at: new Date()
+           });
+        }
       } catch (e) {
         console.error("Failed to update profile:", e);
       }
@@ -168,6 +193,7 @@ class GameDB {
   }
 
   async saveScore(currentScore: number): Promise<void> {
+    // 1. Local Save
     const local = this.getLocalData();
     local.games_played += 1;
     if (currentScore > local.high_score) {
@@ -175,24 +201,35 @@ class GameDB {
     }
     this.saveLocalData(local);
 
+    // 2. Supabase Save
     if (this.client) {
       try {
-        const { data } = await this.client
+        // [수정] 기존 유저 확인 후 INSERT 또는 UPDATE 분기 처리
+        const { data: existing } = await this.client
           .from('profiles')
           .select('high_score, games_played')
           .eq('id', this.userId)
           .single();
 
-        if (data) {
-          const newHighScore = Math.max(data.high_score, currentScore);
+        if (existing) {
+          const newHighScore = Math.max(existing.high_score, currentScore);
           await this.client
             .from('profiles')
             .update({
               high_score: newHighScore,
-              games_played: (data.games_played || 0) + 1,
+              games_played: (existing.games_played || 0) + 1,
               updated_at: new Date()
             })
             .eq('id', this.userId);
+        } else {
+          // 유저가 없다면(초기 생성 실패 등), 점수와 함께 새로 생성
+          await this.client.from('profiles').insert({
+             id: this.userId,
+             high_score: local.high_score, // 로컬에 저장된 최고점수 사용
+             games_played: 1,
+             username: local.username || '',
+             updated_at: new Date()
+          });
         }
       } catch (e) {
         console.error("Failed to save score to server:", e);
