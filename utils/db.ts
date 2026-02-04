@@ -1,15 +1,15 @@
+
 import { createClient } from '@supabase/supabase-js';
-import { INITIAL_HEARTS } from '../constants';
 
 // --- Types ---
 export interface UserRecord {
   id: string;
   high_score: number;
-  hearts: number;
   games_played: number;
 }
 
 export interface RankingEntry {
+  rank: number; // Explicit rank number
   name: string;
   score: number;
   isUser: boolean;
@@ -20,7 +20,7 @@ const SUPABASE_URL = 'https://nxpuaxxdjkupktlyrtje.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54cHVheHhkamt1cGt0bHlydGplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzAwNDE4MjAsImV4cCI6MjA4NTYxNzgyMH0.ojAH2ZcOeVrcFMCoN9C7zGcM3WvuexcjqnJtA23RauY';
 
 // --- Local Storage Key ---
-const LOCAL_DB_KEY = 'shisen_sho_local_data_v2';
+const LOCAL_DB_KEY = 'shisen_sho_local_data_v3';
 
 // --- Helpers ---
 const getDeviceId = (): string => {
@@ -61,9 +61,9 @@ class GameDB {
     const data = localStorage.getItem(LOCAL_DB_KEY);
     if (data) return JSON.parse(data);
     return {
-      hearts: INITIAL_HEARTS,
       high_score: 0,
-      games_played: 0
+      games_played: 0,
+      username: ''
     };
   }
 
@@ -73,11 +73,16 @@ class GameDB {
 
   // --- Public API ---
 
-  async getUserStats(): Promise<{ hearts: number; highScore: number }> {
+  // Fetches full user stats including nickname
+  async getUserProfile(): Promise<{ id: string; nickname: string; highScore: number }> {
     // 1. Local Fallback
     if (!this.client) {
       const local = this.getLocalData();
-      return { hearts: local.hearts, highScore: local.high_score };
+      return { 
+        id: this.userId, 
+        nickname: local.username || '', 
+        highScore: local.high_score 
+      };
     }
 
     // 2. Supabase
@@ -89,35 +94,39 @@ class GameDB {
         .single();
 
       if (error && error.code === 'PGRST116') {
+        // Create new if not exists
         const { error: insertError } = await this.client
           .from('profiles')
           .insert([
             {
               id: this.userId,
-              hearts: INITIAL_HEARTS,
               high_score: 0,
-              username: `Player ${this.userId.slice(-4)}`
+              username: '' // Empty initially
             }
           ]);
         if (insertError) throw insertError;
-        return { hearts: INITIAL_HEARTS, highScore: 0 };
+        return { id: this.userId, nickname: '', highScore: 0 };
       } else if (data) {
-        return { hearts: data.hearts, highScore: data.high_score };
+        return { 
+          id: this.userId, 
+          nickname: data.username || '', 
+          highScore: data.high_score 
+        };
       }
     } catch (e) {
       console.error("Supabase load failed, falling back to local:", e);
-      // Error fallback
       const local = this.getLocalData();
-      return { hearts: local.hearts, highScore: local.high_score };
+      return { id: this.userId, nickname: local.username || '', highScore: local.high_score };
     }
 
-    return { hearts: INITIAL_HEARTS, highScore: 0 };
+    return { id: this.userId, nickname: '', highScore: 0 };
   }
 
-  async saveHearts(hearts: number): Promise<void> {
-    // 1. Local Fallback
+  // Update Nickname
+  async updateProfile(nickname: string): Promise<void> {
+    // 1. Local
     const local = this.getLocalData();
-    local.hearts = hearts;
+    local.username = nickname;
     this.saveLocalData(local);
 
     // 2. Supabase
@@ -125,16 +134,15 @@ class GameDB {
       try {
         await this.client
           .from('profiles')
-          .update({ hearts, updated_at: new Date() })
+          .update({ username: nickname, updated_at: new Date() })
           .eq('id', this.userId);
       } catch (e) {
-        console.error("Failed to save hearts to server:", e);
+        console.error("Failed to update profile:", e);
       }
     }
   }
 
   async saveScore(currentScore: number): Promise<void> {
-    // 1. Local Fallback
     const local = this.getLocalData();
     local.games_played += 1;
     if (currentScore > local.high_score) {
@@ -142,10 +150,8 @@ class GameDB {
     }
     this.saveLocalData(local);
 
-    // 2. Supabase
     if (this.client) {
       try {
-        // Optimistic update logic usually, but here we fetch-check-update for simplicity in logic
         const { data } = await this.client
           .from('profiles')
           .select('high_score, games_played')
@@ -170,58 +176,57 @@ class GameDB {
   }
 
   async getRankings(currentScore: number): Promise<RankingEntry[]> {
-    // 1. Local Fallback (Mock Rankings)
     if (!this.client) {
-      const local = this.getLocalData();
-      const rankingPool = [
-        ...MOCK_RANKERS.map(r => ({ ...r, isUser: false })),
-      ];
-      
-      const userBest = Math.max(local.high_score, currentScore);
-      rankingPool.push({ name: 'YOU', score: userBest, isUser: true });
-
-      rankingPool.sort((a, b) => b.score - a.score);
-      return rankingPool.slice(0, 5);
+      const all = [...MOCK_RANKERS, { name: 'YOU', score: currentScore }];
+      all.sort((a, b) => b.score - a.score);
+      return all.slice(0, 5).map((r, i) => ({
+        rank: i + 1,
+        name: r.name,
+        score: r.score,
+        isUser: r.name === 'YOU'
+      }));
     }
 
-    // 2. Supabase
     try {
       const { data: topPlayers } = await this.client
         .from('profiles')
         .select('id, username, high_score')
         .order('high_score', { ascending: false })
-        .limit(10);
+        .limit(3);
 
-      let userFound = false;
-
-      const rankingList: RankingEntry[] = (topPlayers || []).map((p: any) => {
-        const isMe = p.id === this.userId;
-        if (isMe) userFound = true;
-        
-        return {
-          name: isMe ? 'YOU' : (p.username || 'Anonymous'),
+      const rankingList: RankingEntry[] = [];
+      
+      (topPlayers || []).forEach((p: any, index: number) => {
+        rankingList.push({
+          rank: index + 1,
+          name: p.id === this.userId ? 'YOU (Best)' : (p.username || 'Anonymous'),
           score: p.high_score,
-          isUser: isMe
-        };
+          isUser: false
+        });
       });
 
-      // If user is not in top 10, add them (using currentScore as best effort proxy if local high_score logic isn't perfectly synced or just to show 'YOU' context)
-      // Note: We already called saveScore, so if we are in top 10, we are found. 
-      // If we are NOT in top 10, we simply append YOU at the end (or sorted position)
-      if (!userFound) {
-        rankingList.push({
+      const { count } = await this.client
+        .from('profiles')
+        .select('*', { count: 'exact', head: true })
+        .gt('high_score', currentScore);
+      
+      const myRank = (count || 0) + 1;
+
+      const myEntry: RankingEntry = {
+          rank: myRank,
           name: 'YOU',
           score: currentScore,
           isUser: true
-        });
-      }
-
-      rankingList.sort((a, b) => b.score - a.score);
+      };
       
-      return rankingList.slice(0, 5);
+      const filteredTop3 = rankingList.filter(r => r.name !== 'YOU (Best)');
+      let finalList = [...filteredTop3];
+      finalList.push(myEntry);
+      finalList.sort((a, b) => a.rank - b.rank);
+      return finalList;
 
     } catch (e) {
-      console.error("Failed to get rankings from server:", e);
+      console.error("Failed to get rankings:", e);
       return [];
     }
   }

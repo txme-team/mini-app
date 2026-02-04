@@ -1,3 +1,4 @@
+
 export type Point = {
   row: number;
   col: number;
@@ -18,7 +19,7 @@ export interface LevelConfig {
   rows: number;
   cols: number;
   tileTypesCount: number; // How many distinct animals appear
-  timeBonus: number; // Extra time given per level (if any)
+  timeLimit: number; // Seconds allowed for this level
 }
 
 export type Path = Point[];
@@ -26,7 +27,6 @@ export type Path = Point[];
 export interface GameState {
   level: number;
   score: number;
-  hearts: number; // For hints
   timeLeft: number; // in seconds
   isPlaying: boolean;
   isGameOver: boolean;
@@ -38,4 +38,11 @@ export interface FloatingTextData {
   text: string;
   subText?: string;
   type: 'normal' | 'combo';
+}
+
+// Auth Types
+export interface UserProfile {
+  id: string;
+  nickname: string;
+  highScore: number;
 }

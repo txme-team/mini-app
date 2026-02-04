@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { TileData } from '../types';
 import { ICONS_MAP } from './Icons';
@@ -8,9 +9,10 @@ interface TileProps {
   isError: boolean;
   isMatching?: boolean;
   onClick: (tile: TileData) => void;
+  isShuffling?: boolean;
 }
 
-const Tile: React.FC<TileProps> = ({ tile, isSelected, isError, isMatching, onClick }) => {
+const Tile: React.FC<TileProps> = ({ tile, isSelected, isError, isMatching, onClick, isShuffling }) => {
   if (tile.isMatched) {
     return <div className="w-full h-full" />;
   }
@@ -25,6 +27,8 @@ const Tile: React.FC<TileProps> = ({ tile, isSelected, isError, isMatching, onCl
         flex items-center justify-center
         transition-colors duration-75
         border-2
+        animate-pop-in
+        ${isShuffling ? 'animate-rumble' : ''}
         ${isMatching 
             ? 'bg-yellow-300 border-yellow-500 animate-match-pop z-50' 
             : isSelected 
@@ -35,7 +39,7 @@ const Tile: React.FC<TileProps> = ({ tile, isSelected, isError, isMatching, onCl
       `}
     >
         {/* Remove all padding/margins, force icon to take full available space minus minimal breathing room */}
-        <div className={`w-full h-full p-[1px] ${isSelected && !isMatching ? 'animate-pixel-bounce' : ''}`}>
+        <div className={`w-full h-full p-[1px] ${isSelected && !isMatching && !isShuffling ? 'animate-pixel-bounce' : ''}`}>
            <Icon />
         </div>
     </div>

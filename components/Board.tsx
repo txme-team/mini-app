@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useRef } from 'react';
 import { TileData, Point, Path } from '../types';
 import Tile from './Tile';
@@ -11,6 +12,7 @@ interface BoardProps {
   onTileClick: (tile: TileData) => void;
   connectionPath: Path | null;
   isPaused: boolean;
+  isShuffling?: boolean;
 }
 
 const Board: React.FC<BoardProps> = ({ 
@@ -20,7 +22,8 @@ const Board: React.FC<BoardProps> = ({
   errorTile, 
   onTileClick,
   connectionPath,
-  isPaused
+  isPaused,
+  isShuffling = false
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0, cellWidth: 0, cellHeight: 0 });
@@ -82,6 +85,7 @@ const Board: React.FC<BoardProps> = ({
                       isError={errorTile?.id === tile.id}
                       isMatching={isMatching}
                       onClick={onTileClick}
+                      isShuffling={isShuffling}
                     />
                   ) : (
                     <div className="w-full h-full" />

@@ -1,3 +1,4 @@
+
 // A simple audio synth to avoid external asset dependencies
 class SoundManager {
   private ctx: AudioContext | null = null;
@@ -7,11 +8,12 @@ class SoundManager {
   private isBgmPlaying: boolean = false;
 
   constructor() {
-    // Intentionally empty to comply with Autoplay Policy.
-    // AudioContext should be initialized on first user interaction.
+    // Intentionally empty.
   }
 
-  private ensureContext() {
+  // Call this on the FIRST user interaction (e.g. Game Start button)
+  // This is critical for iOS Safari to unlock audio.
+  init() {
     if (!this.ctx) {
       try {
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -22,25 +24,49 @@ class SoundManager {
         console.error("Web Audio API not supported", e);
       }
     }
-    
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume().catch(e => console.error("Audio resume failed", e));
+
+    if (this.ctx) {
+      // 1. Resume context if suspended
+      if (this.ctx.state === 'suspended') {
+        this.ctx.resume().catch(e => console.error("Audio resume failed", e));
+      }
+
+      // 2. iOS Unlock Trick: Play a short silent buffer
+      // This forces the audio hardware to wake up immediately within the click event.
+      try {
+        const buffer = this.ctx.createBuffer(1, 1, 22050);
+        const source = this.ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(this.ctx.destination);
+        source.start(0);
+      } catch (e) {
+        console.error("iOS Audio Unlock failed", e);
+      }
+    }
+  }
+
+  private ensureContext() {
+    // Just a fallback, but init() should be called explicitly first.
+    if (!this.ctx) {
+        this.init();
+    } else if (this.ctx.state === 'suspended') {
+        this.ctx.resume().catch(() => {});
     }
   }
 
   // --- Haptic Feedback Helper ---
   private vibrate(pattern: number | number[]) {
     if (typeof navigator !== 'undefined' && navigator.vibrate) {
-        // Simple try-catch just in case of weird browser behaviors
         try {
             navigator.vibrate(pattern);
         } catch (e) {
-            // Ignore if vibration fails
+            // Ignore
         }
     }
   }
 
   toggleMute() {
+    this.ensureContext(); // Ensure context exists when toggling
     this.isMuted = !this.isMuted;
     if (this.isMuted) {
       this.stopBGM();
@@ -51,7 +77,7 @@ class SoundManager {
   }
 
   playSelect() {
-    this.vibrate(10); // Light tap
+    this.vibrate(10); 
     if (this.isMuted) return;
     this.ensureContext();
     if (!this.ctx) return;
@@ -74,12 +100,11 @@ class SoundManager {
   }
 
   playMatchSuccess() {
-    this.vibrate([10, 30, 10]); // Success vibration pattern
+    this.vibrate([10, 30, 10]);
     if (this.isMuted) return;
     this.ensureContext();
     if (!this.ctx) return;
     
-    // Play a happy major arpeggio
     const notes = [523.25, 659.25, 783.99, 1046.50]; // C Major
     notes.forEach((freq, i) => {
       if (!this.ctx) return;
@@ -101,8 +126,34 @@ class SoundManager {
     });
   }
 
+  playStoreSuccess() {
+    this.vibrate([50, 50, 100]);
+    if (this.isMuted) return;
+    this.ensureContext();
+    if (!this.ctx) return;
+
+    // "Coin" / Cash register sound
+    const notes = [880, 1760]; 
+    notes.forEach((freq, i) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(freq, this.ctx.currentTime + (i * 0.1));
+        
+        const startTime = this.ctx.currentTime + (i * 0.1);
+        gain.gain.setValueAtTime(0.05, startTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.1);
+        
+        osc.start(startTime);
+        osc.stop(startTime + 0.1);
+    });
+  }
+
   playError() {
-    this.vibrate([50, 50, 50]); // Error vibration (longer buzzes)
+    this.vibrate([50, 50, 50]);
     if (this.isMuted) return;
     this.ensureContext();
     if (!this.ctx) return;
@@ -125,7 +176,7 @@ class SoundManager {
   }
 
   playLevelComplete() {
-    this.vibrate([20, 30, 20, 30, 50]); // Party vibration
+    this.vibrate([20, 30, 20, 30, 50]);
     if (this.isMuted) return;
     this.ensureContext();
     if (!this.ctx) return;

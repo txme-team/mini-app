@@ -1,3 +1,4 @@
+
 import { Point, TileData, TileType } from '../types';
 
 // Check if a point is within grid bounds
@@ -145,14 +146,34 @@ export const createBoard = (rows: number, cols: number, tileTypesCount: number):
   const tiles: TileType[] = [];
 
   for (let i = 0; i < pairsNeeded; i++) {
+    // Generate types 1..tileTypesCount, looping if needed
     const type = (i % tileTypesCount) + 1;
     tiles.push(type, type);
   }
 
-  // Shuffle
+  // Initial Fisher-Yates Shuffle
   for (let i = tiles.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [tiles[i], tiles[j]] = [tiles[j], tiles[i]];
+  }
+
+  // --- HARD MODE ADJUSTMENT: De-clumping ---
+  // Try to prevent adjacent identical tiles to reduce "easy" matches.
+  // This loop swaps a tile if it matches its left neighbor.
+  for (let i = 1; i < tiles.length; i++) {
+    if (tiles[i] === tiles[i-1]) {
+      // Find a random candidate to swap with that isn't the same type
+      let swapIdx = Math.floor(Math.random() * tiles.length);
+      let attempts = 0;
+      while (tiles[swapIdx] === tiles[i] && attempts < 10) {
+        swapIdx = Math.floor(Math.random() * tiles.length);
+        attempts++;
+      }
+      // Swap
+      const temp = tiles[i];
+      tiles[i] = tiles[swapIdx];
+      tiles[swapIdx] = temp;
+    }
   }
 
   // Place on board (with padding)
@@ -179,47 +200,97 @@ export const hasPossibleMoves = (board: (TileData | null)[][]): boolean => {
   return findAvailableMatch(board) !== null;
 };
 
-// Shuffle only remaining tiles
+// Improved Shuffle: Scatters tiles to completely random new positions
 export const shuffleBoard = (board: (TileData | null)[][]): (TileData | null)[][] => {
     const rows = board.length;
     const cols = board[0].length;
+    const playRows = rows - 2;
+    const playCols = cols - 2;
     
-    // Extract remaining tiles
-    const remainingTiles: TileData[] = [];
-    const positions: Point[] = [];
-
+    // 1. Collect all active tile types (ignoring current position)
+    const activeTypes: TileType[] = [];
+    
     for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
             const tile = board[r][c];
             if (tile && !tile.isMatched) {
-                remainingTiles.push(tile);
-                positions.push({row: r, col: c});
+                activeTypes.push(tile.type);
             }
         }
     }
 
-    // Shuffle tile data (types) but keep positions list same to refill
-    for (let i = remainingTiles.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        const tempType = remainingTiles[i].type;
-        remainingTiles[i].type = remainingTiles[j].type;
-        remainingTiles[j].type = tempType;
-        remainingTiles[i].id = `shuffled-${Math.random()}`;
-        remainingTiles[j].id = `shuffled-${Math.random()}`;
+    if (activeTypes.length === 0) return board;
+
+    // 2. Generate ALL valid playable positions (excluding border)
+    // This allows tiles to move to spaces that were previously empty
+    const allValidPositions: Point[] = [];
+    for (let r = 1; r <= playRows; r++) {
+        for (let c = 1; c <= playCols; c++) {
+            allValidPositions.push({ row: r, col: c });
+        }
     }
 
-    const newBoard = board.map(row => row.map(tile => {
-        if (tile === null) return null; 
-        if (tile.isMatched) return tile; 
-        return null;
-    }));
+    // Try shuffling until we find a solvable arrangement (max 20 attempts)
+    let bestBoard: (TileData | null)[][] | null = null;
 
-    for (let i = 0; i < remainingTiles.length; i++) {
-        const pos = positions[i];
-        const tile = remainingTiles[i];
-        tile.position = pos;
-        newBoard[pos.row][pos.col] = tile;
+    for (let attempt = 0; attempt < 20; attempt++) {
+        // A. Shuffle the types
+        const shuffledTypes = [...activeTypes];
+        for (let i = shuffledTypes.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffledTypes[i], shuffledTypes[j]] = [shuffledTypes[j], shuffledTypes[i]];
+        }
+
+        // B. Shuffle the positions
+        const shuffledPositions = [...allValidPositions];
+        for (let i = shuffledPositions.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffledPositions[i], shuffledPositions[j]] = [shuffledPositions[j], shuffledPositions[i]];
+        }
+
+        // C. Create a fresh empty board
+        const tempBoard: (TileData | null)[][] = Array.from({ length: rows }, () => Array(cols).fill(null));
+
+        // D. Place active tiles into the first N random positions
+        for (let i = 0; i < shuffledTypes.length; i++) {
+            const pos = shuffledPositions[i];
+            tempBoard[pos.row][pos.col] = {
+                id: `shuffled-${attempt}-${i}-${Date.now()}`, // Force React re-render with new ID
+                type: shuffledTypes[i],
+                position: pos,
+                isMatched: false
+            };
+        }
+
+        // E. Check if solvable
+        if (hasPossibleMoves(tempBoard)) {
+            bestBoard = tempBoard;
+            break;
+        }
     }
 
-    return newBoard as (TileData | null)[][];
+    // If we found a solvable board, return it
+    if (bestBoard) {
+        return bestBoard;
+    }
+
+    // Fallback: If 20 attempts fail (unlikely), return a simple random scatter
+    const finalBoard: (TileData | null)[][] = Array.from({ length: rows }, () => Array(cols).fill(null));
+    
+    // Shuffle types one last time
+    activeTypes.sort(() => Math.random() - 0.5);
+    // Shuffle positions one last time
+    allValidPositions.sort(() => Math.random() - 0.5);
+
+    for (let i = 0; i < activeTypes.length; i++) {
+        const pos = allValidPositions[i];
+        finalBoard[pos.row][pos.col] = {
+            id: `fallback-${i}-${Date.now()}`,
+            type: activeTypes[i],
+            position: pos,
+            isMatched: false
+        };
+    }
+    
+    return finalBoard;
 }
