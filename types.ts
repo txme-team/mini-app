@@ -19,6 +19,7 @@ export interface LevelConfig {
   rows: number;
   cols: number;
   tileTypesCount: number; // How many distinct animals appear
+  tileTypePool?: number[]; // Optional fixed pool for stronger per-level curation
   timeLimit: number; // Seconds allowed for this level
 }
 
@@ -38,6 +39,13 @@ export interface FloatingTextData {
   text: string;
   subText?: string;
   type: 'normal' | 'combo';
+}
+
+export interface RankingEntry {
+  rank: number;
+  name: string;
+  score: number;
+  isUser: boolean;
 }
 
 // Auth Types

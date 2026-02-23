@@ -1,6 +1,8 @@
 
-// A simple audio synth to avoid external asset dependencies
-class SoundManager {
+import { SoundService } from '../services/contracts';
+
+// A simple web-audio synth implementation.
+class WebSoundManager implements SoundService {
   private ctx: AudioContext | null = null;
   private isMuted: boolean = false;
   private bgmOscillators: OscillatorNode[] = [];
@@ -181,6 +183,34 @@ class SoundManager {
     osc.stop(this.ctx.currentTime + 0.2);
   }
 
+  playGameOver() {
+    this.vibrate([60, 40, 80]);
+    if (this.isMuted) return;
+    this.ensureContext();
+    if (!this.ctx) return;
+
+    const now = this.ctx.currentTime;
+    const notes = [220, 196, 174, 146];
+    notes.forEach((freq, i) => {
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.type = 'square';
+      const start = now + i * 0.09;
+      osc.frequency.setValueAtTime(freq, start);
+      osc.frequency.exponentialRampToValueAtTime(Math.max(80, freq * 0.82), start + 0.12);
+
+      gain.gain.setValueAtTime(0.09, start);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.12);
+
+      osc.start(start);
+      osc.stop(start + 0.12);
+    });
+  }
+
   playLevelComplete() {
     this.vibrate([20, 30, 20, 30, 50]);
     if (this.isMuted) return;
@@ -204,6 +234,51 @@ class SoundManager {
     });
   }
 
+  playEndingCelebration() {
+    this.vibrate([30, 20, 30, 20, 60, 40, 60]);
+    if (this.isMuted) return;
+    this.ensureContext();
+    if (!this.ctx) return;
+
+    const now = this.ctx.currentTime;
+
+    // Fanfare chord stack
+    const chord = [523.25, 659.25, 783.99, 1046.5];
+    chord.forEach((freq, i) => {
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.type = 'triangle';
+
+      const start = now + i * 0.03;
+      osc.frequency.setValueAtTime(freq, start);
+      gain.gain.setValueAtTime(0.001, start);
+      gain.gain.exponentialRampToValueAtTime(0.12, start + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.45);
+      osc.start(start);
+      osc.stop(start + 0.45);
+    });
+
+    // Clap-like bright ticks
+    const clapTimes = [0.08, 0.16, 0.31, 0.44, 0.58, 0.72];
+    clapTimes.forEach((t) => {
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(1800, now + t);
+      osc.frequency.exponentialRampToValueAtTime(850, now + t + 0.03);
+      gain.gain.setValueAtTime(0.045, now + t);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + t + 0.04);
+      osc.start(now + t);
+      osc.stop(now + t + 0.04);
+    });
+  }
+
   playBGM() {
     if (this.isMuted || this.isBgmPlaying) return;
     this.ensureContext();
@@ -218,4 +293,6 @@ class SoundManager {
   }
 }
 
-export const soundManager = new SoundManager();
+export const soundService: SoundService = new WebSoundManager();
+// Backward compatibility for existing imports.
+export const soundManager = soundService;

@@ -4,35 +4,43 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="description" content="댕댕팡 - 귀여운 강아지 타일을 매칭하는 레트로 퍼즐 게임" />
     <meta name="theme-color" content="#eff6ff" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="댕댕팡" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="format-detection" content="telephone=no" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/app-icon-192.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/app-icon-192.png" />
     
     <title>댕댕팡</title>
     
-    <!-- 
-      [중요] 토스 광고 SDK 스크립트 
-      개발자 문서(https://developers-apps-in-toss.toss.im/ads/develop.html)에서 
-      제공하는 실제 스크립트 주소로 src 값을 변경해주세요.
-      
-      예시: <script src="https://toss.im/ads/v1/sdk.js"></script> 
-      (아래는 예시 주소이므로 실제 주소로 교체해야 작동합니다)
-    -->
-    <script src="https://toss.im/ads/sdk/placeholder.js" onerror="console.warn('Toss Ads Script Failed to Load. Check index.html');"></script>
+    <!-- AdMob is loaded via native plugin in app runtime -->
     
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=DotGothic16&display=swap');
       @import url('https://fonts.googleapis.com/css2?family=Gugi&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap');
       
       :root {
         --safe-top: env(safe-area-inset-top, 0px);
         --safe-bottom: env(safe-area-inset-bottom, 0px);
+        --dog-ink: #1f4e7e;
+        --dog-ink-deep: #173d63;
+        --dog-lavender: #c9e1f3;
+        --dog-lavender-soft: #e8f3fb;
+        --dog-ice: #dff4ff;
+        --dog-cream: #f9fdff;
+        --dog-butter: #ffc85a;
+        --dog-caramel: #f39a3a;
+        --dog-caramel-deep: #a45b1e;
+        --dog-sky: #7fd0ff;
       }
 
       body {
-        font-family: 'DotGothic16', sans-serif;
+        font-family: 'Noto Sans KR', 'DotGothic16', sans-serif;
         user-select: none;
         -webkit-user-select: none; /* Safari/Chrome */
         -webkit-touch-callout: none; /* Disable long-press menu */
@@ -48,24 +56,227 @@
       
       /* Diagonal Stripes */
       .bg-retro-stripe {
-        background-color: #eff6ff; 
-        background-image: repeating-linear-gradient(
-          45deg,
-          #dbeafe,
-          #dbeafe 10px,
-          #eff6ff 10px,
-          #eff6ff 20px
-        );
+        background-color: #d4e8f7;
+        background-image:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0) 22%),
+          radial-gradient(circle at 15% 20%, rgba(255, 255, 255, 0.45) 0 18%, rgba(255, 255, 255, 0) 19%),
+          radial-gradient(circle at 80% 14%, rgba(179, 229, 255, 0.5) 0 16%, rgba(179, 229, 255, 0) 17%),
+          repeating-linear-gradient(
+            0deg,
+            rgba(255, 255, 255, 0.11),
+            rgba(255, 255, 255, 0.11) 1px,
+            transparent 1px,
+            transparent 3px
+          );
       }
 
       /* Blue Grid Pattern */
       .bg-retro-grid {
-        background-color: #f0f9ff;
-        background-image: 
-          linear-gradient(#bfdbfe 1px, transparent 1px),
-          linear-gradient(90deg, #bfdbfe 1px, transparent 1px);
-        background-size: 20px 20px;
-        box-shadow: inset 0 0 20px rgba(59, 130, 246, 0.2);
+        background-color: #eaf6ff;
+        background-image:
+          radial-gradient(circle, rgba(106, 169, 220, 0.25) 1px, transparent 1px),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.38) 0%, rgba(255, 255, 255, 0.1) 100%);
+        background-size: 4px 4px, 100% 100%;
+        box-shadow: inset 0 0 0 2px rgba(31, 78, 126, 0.2);
+      }
+
+      .bg-dog-lounge {
+        background:
+          radial-gradient(circle at 8% 16%, rgba(255, 255, 255, 0.42) 0, rgba(255, 255, 255, 0) 28%),
+          radial-gradient(circle at 80% 12%, rgba(188, 230, 255, 0.55) 0, rgba(188, 230, 255, 0) 26%),
+          linear-gradient(180deg, #d2e8f8 0%, #c2dff4 22%, #c8e6f9 58%, #bdd9ef 100%);
+      }
+
+      .paw-pattern {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.1;
+        background-image:
+          radial-gradient(circle at 7px 6px, rgba(47, 107, 156, 0.24) 2px, transparent 3px),
+          radial-gradient(circle at 14px 6px, rgba(47, 107, 156, 0.24) 2px, transparent 3px),
+          radial-gradient(circle at 4px 12px, rgba(47, 107, 156, 0.24) 2px, transparent 3px),
+          radial-gradient(circle at 17px 12px, rgba(47, 107, 156, 0.24) 2px, transparent 3px),
+          radial-gradient(ellipse at 10.5px 17px, rgba(47, 107, 156, 0.24) 4px 3px, transparent 5px);
+        background-size: 76px 76px;
+      }
+
+      .ui-shell {
+        background: linear-gradient(180deg, #d6ebf9 0%, #c8e1f4 100%);
+        border: 1px solid var(--dog-ink-deep);
+        box-shadow:
+          inset 0 0 0 1px rgba(255, 255, 255, 0.42),
+          2px 2px 0 #5b96c2;
+      }
+
+      .ui-header {
+        background: linear-gradient(180deg, #eff8ff 0%, #d9ecfa 46%, #c4e0f3 100%);
+        border-bottom: 1px solid #b8d4e8;
+        color: var(--dog-ink-deep);
+      }
+
+      .ui-panel {
+        background: linear-gradient(180deg, #d8edf9 0%, #cde6f5 100%);
+        border: 1px solid var(--dog-ink);
+        box-shadow:
+          inset 0 0 0 1px #ecf4ff,
+          0 0 0 1px rgba(31, 78, 126, 0.2);
+      }
+
+      .ui-mini-btn {
+        background: linear-gradient(180deg, #f9fdff 0%, #dcedf8 60%, #c7e1f2 100%);
+        border: 1px solid var(--dog-ink);
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.45), 1px 1px 0 rgba(91, 150, 194, 0.65);
+        color: var(--dog-ink-deep);
+      }
+      .ui-mini-btn:active {
+        transform: translateY(1px);
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.32), 1px 1px 0 rgba(91, 150, 194, 0.65);
+      }
+
+      .ui-action-hint {
+        background: linear-gradient(180deg, #ffe99e 0%, var(--dog-butter) 52%, #efb83f 100%);
+        border: 1px solid var(--dog-ink-deep);
+        box-shadow: inset 0 0 0 1px rgba(255, 250, 214, 0.65), 1px 1px 0 #78accf;
+      }
+
+      .ui-action-shuffle {
+        background: linear-gradient(180deg, #ffd9b0 0%, #f6b36d 52%, #e68937 100%);
+        border: 1px solid var(--dog-ink-deep);
+        box-shadow: inset 0 0 0 1px rgba(255, 241, 222, 0.65), 1px 1px 0 #78accf;
+      }
+
+      .card-tag {
+        border: 1px solid var(--dog-ink);
+        background: #ffe8aa;
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.45), 1px 1px 0 rgba(17,24,39,0.25);
+        color: #1a2242;
+      }
+
+      .retro-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 34px;
+        padding: 0 12px;
+        border: 1px solid var(--dog-ink-deep);
+        box-shadow: 1px 1px 0 #77a9cc;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+
+      .hud-card {
+        position: relative;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.75),
+          inset 0 -1px 0 rgba(23, 61, 99, 0.25),
+          2px 2px 0 #77a9cc;
+      }
+
+      .hud-card::before {
+        content: "";
+        position: absolute;
+        inset: 3px;
+        border: 1px solid rgba(23, 61, 99, 0.22);
+        pointer-events: none;
+      }
+
+      .hud-label {
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        line-height: 1;
+      }
+
+      .hud-value {
+        font-size: 18px;
+        font-weight: 700;
+        line-height: 1;
+        text-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
+      }
+
+      .hud-value-time {
+        font-size: 26px;
+        font-weight: 700;
+        line-height: 1;
+        letter-spacing: 0.04em;
+      }
+
+      .retro-pill-blue {
+        background: linear-gradient(180deg, #f5fbff 0%, #ddf0fb 52%, #c7e2f4 100%);
+        color: var(--dog-ink-deep);
+      }
+
+      .retro-pill-gold {
+        background: linear-gradient(180deg, #ffeeb2 0%, #ffd765 52%, #f2b43b 100%);
+        color: #5c360d;
+      }
+
+      .retro-pill-time {
+        background: linear-gradient(180deg, #f6fcff 0%, #deeff8 58%, #cce2f1 100%);
+        color: var(--dog-ink-deep);
+        min-width: 132px;
+        justify-content: center;
+      }
+
+      .retro-pill-coin {
+        width: 20px;
+        height: 20px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        overflow: visible;
+      }
+
+      .retro-icon-btn {
+        width: 34px;
+        height: 34px;
+        border: 1px solid var(--dog-ink-deep);
+        background: linear-gradient(180deg, #f9fdff 0%, #e0f0fb 54%, #cae3f4 100%);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 1px 1px 0 #77a9cc;
+        color: var(--dog-ink-deep);
+      }
+
+      .retro-icon-btn:active {
+        transform: translateY(1px);
+        box-shadow: 1px 1px 0 #77a9cc;
+      }
+
+      .pixel-round-2,
+      .pixel-round-3,
+      .pixel-round-4 {
+        border-radius: 0 !important;
+      }
+
+      .pixel-round-2 {
+        clip-path: polygon(2px 0, calc(100% - 2px) 0, 100% 2px, 100% calc(100% - 2px), calc(100% - 2px) 100%, 2px 100%, 0 calc(100% - 2px), 0 2px);
+      }
+
+      .pixel-round-3 {
+        clip-path: polygon(4px 0, calc(100% - 4px) 0, calc(100% - 2px) 2px, 100% 4px, 100% calc(100% - 4px), calc(100% - 2px) calc(100% - 2px), calc(100% - 4px) 100%, 4px 100%, 2px calc(100% - 2px), 0 calc(100% - 4px), 0 4px, 2px 2px);
+      }
+
+      .pixel-round-4 {
+        clip-path: polygon(6px 0, calc(100% - 6px) 0, calc(100% - 3px) 3px, 100% 6px, 100% calc(100% - 6px), calc(100% - 3px) calc(100% - 3px), calc(100% - 6px) 100%, 6px 100%, 3px calc(100% - 3px), 0 calc(100% - 6px), 0 6px, 3px 3px);
+      }
+
+      .pixel-btn-corner {
+        border-radius: 8px !important;
+        clip-path: none !important;
+      }
+
+      .pixel-btn-corner-sm {
+        border-radius: 6px !important;
+        clip-path: none !important;
+      }
+
+      .pixel-sheet-corner {
+        border-radius: 10px !important;
+        clip-path: none !important;
       }
 
       /* CRT Scanline Overlay */
@@ -116,6 +327,16 @@
       }
       .animate-pixel-bounce {
         animation: pixel-bounce 1s step-end infinite;
+      }
+
+      @keyframes home-logo-bounce {
+        0%, 100% { transform: translateY(0) scale(1); }
+        25% { transform: translateY(-4px) scale(1.01); }
+        50% { transform: translateY(-7px) scale(1.02); }
+        75% { transform: translateY(-3px) scale(1.01); }
+      }
+      .animate-home-logo-bounce {
+        animation: home-logo-bounce 1.2s ease-in-out infinite;
       }
 
       @keyframes dog-bounce {
@@ -194,6 +415,28 @@
         animation: pop-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
       }
 
+      @keyframes pixel-confetti-burst {
+        0% {
+          transform: translate(-50%, -50%) scale(1);
+          opacity: 1;
+        }
+        75% {
+          transform: translate(calc(-50% + var(--dx, 0px)), calc(-50% + var(--dy, 0px))) scale(1);
+          opacity: 1;
+        }
+        100% {
+          transform: translate(calc(-50% + var(--dx, 0px)), calc(-50% + var(--dy, 0px) + 14px)) scale(0.8);
+          opacity: 0;
+        }
+      }
+
+      .pixel-confetti-dot {
+        position: absolute;
+        display: block;
+        border: 1px solid rgba(26, 34, 66, 0.35);
+      }
+
+
     </style>
   <script type="importmap">
 {
@@ -208,8 +451,9 @@
 </script>
 <link rel="stylesheet" href="/index.css">
 </head>
-  <body class="bg-retro-stripe text-slate-900 h-screen w-screen overflow-hidden">
-    <div id="root" class="h-full w-full scanlines"></div>
+  <body class="bg-dog-lounge text-slate-900 h-screen w-screen overflow-hidden">
+    <div class="paw-pattern"></div>
+    <div id="root" class="h-full w-full"></div>
   <script type="module" src="/index.tsx"></script>
 </body>
 </html>

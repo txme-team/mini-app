@@ -1,63 +1,216 @@
+type ListenerHandle = { remove: () => Promise<void> | void };
+
+type AdMobPlugin = {
+  initialize?: (options?: Record<string, unknown>) => Promise<unknown>;
+  prepareRewardVideoAd?: (options: {
+    adId: string;
+    isTesting?: boolean;
+    npa?: boolean;
+  }) => Promise<unknown>;
+  showRewardVideoAd?: () => Promise<unknown>;
+  addListener?: (eventName: string, callback: (event?: any) => void) => Promise<ListenerHandle> | ListenerHandle;
+};
 
 declare global {
   interface Window {
-    // Toss Ads Global Object
-    TossAds?: {
-      showRewardedVideo: (options: {
-        adUnitId: string;
-        onSuccess: () => void;
-        onFailure: (error: any) => void;
-      }) => void;
+    Capacitor?: {
+      getPlatform?: () => string;
+      isNativePlatform?: () => boolean;
+      Plugins?: {
+        AdMob?: AdMobPlugin;
+      };
     };
   }
 }
 
-// TEST ID from Toss Docs
-const TOSS_AD_UNIT_ID = 'ait-ad-test-rewarded-id';
+const DEFAULT_ANDROID_REWARDED_ID = 'ca-app-pub-3940256099942544/5224354917';
+const DEFAULT_IOS_REWARDED_ID = 'ca-app-pub-3940256099942544/1712485313';
 
-export const initAds = () => {
-  if (typeof window !== 'undefined' && !window.TossAds) {
-    console.log("[TossAds] SDK not detected (Dev Mode)");
+const ENV_ANDROID_REWARDED_ID = (
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_ADMOB_ANDROID_REWARDED_ID) ||
+  DEFAULT_ANDROID_REWARDED_ID
+).trim();
+
+const ENV_IOS_REWARDED_ID = (
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_ADMOB_IOS_REWARDED_ID) ||
+  DEFAULT_IOS_REWARDED_ID
+).trim();
+
+const ENV_ADMOB_TEST_MODE = (
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_ADMOB_TEST_MODE) ||
+  'true'
+).trim().toLowerCase();
+
+let admobInitPromise: Promise<void> | null = null;
+
+const isLocalWeb = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+};
+
+const getPlatform = (): string => {
+  if (typeof window === 'undefined' || !window.Capacitor) return 'web';
+  if (typeof window.Capacitor.getPlatform === 'function') return window.Capacitor.getPlatform();
+  return 'web';
+};
+
+const isNativeApp = (): boolean => {
+  if (typeof window === 'undefined' || !window.Capacitor) return false;
+  if (typeof window.Capacitor.isNativePlatform === 'function') return window.Capacitor.isNativePlatform();
+  return getPlatform() !== 'web';
+};
+
+const getAdMobPlugin = (): AdMobPlugin | null => {
+  if (typeof window === 'undefined' || !window.Capacitor?.Plugins?.AdMob) return null;
+  return window.Capacitor.Plugins.AdMob;
+};
+
+const isTestingMode = (): boolean => {
+  return ENV_ADMOB_TEST_MODE !== 'false';
+};
+
+const getRewardedAdUnitId = (): string => {
+  const platform = getPlatform();
+  return platform === 'ios' ? ENV_IOS_REWARDED_ID : ENV_ANDROID_REWARDED_ID;
+};
+
+const ensureAdMobInitialized = async (): Promise<void> => {
+  if (!isNativeApp()) return;
+
+  const plugin = getAdMobPlugin();
+  if (!plugin || typeof plugin.initialize !== 'function') {
+    throw new Error('AdMob plugin not found. Install and register AdMob plugin in native app.');
+  }
+
+  if (!admobInitPromise) {
+    admobInitPromise = plugin.initialize({
+      initializeForTesting: isTestingMode(),
+    }).then(() => undefined);
+  }
+
+  return admobInitPromise;
+};
+
+const addAdMobListener = async (
+  eventName: string,
+  callback: (event?: any) => void
+): Promise<ListenerHandle | null> => {
+  const plugin = getAdMobPlugin();
+  if (!plugin?.addListener) return null;
+  const handle = await plugin.addListener(eventName, callback);
+  return handle || null;
+};
+
+const cleanupListeners = async (handles: Array<ListenerHandle | null>) => {
+  for (const handle of handles) {
+    try {
+      if (handle && typeof handle.remove === 'function') {
+        await handle.remove();
+      }
+    } catch {
+      // No-op
+    }
   }
 };
 
-/**
- * Shows a rewarded video ad using Toss Ads SDK.
- * Includes fallback for development and error handling.
- */
-export const showRewardAd = (onReward: () => void, onDismiss: () => void) => {
-  
-  // 1. Check if Toss Ads is available (Real Environment)
-  if (typeof window !== 'undefined' && window.TossAds && typeof window.TossAds.showRewardedVideo === 'function') {
-    console.log(`[TossAds] Requesting Ad...`);
-    
-    try {
-      window.TossAds.showRewardedVideo({
-        adUnitId: TOSS_AD_UNIT_ID,
-        onSuccess: () => {
-          console.log("[TossAds] Ad Success");
-          onReward();
-        },
-        onFailure: (error) => {
-          console.error("[TossAds] Ad Failed:", error);
-          // Don't alert in production, just dismiss to let game continue
-          onDismiss();
-        }
-      });
-    } catch (e) {
-      console.error("[TossAds] Exception:", e);
-      onDismiss();
-    }
+export const initAds = () => {
+  if (!isNativeApp()) {
+    console.log('[AdMob] Web mode: native ads are disabled.');
     return;
   }
 
-  // 2. Fallback / Dev Mode (When SDK is missing)
-  // Remove blocking 'confirm' to prevent UI freeze bugs.
-  // Just simulate a short delay and grant reward for testing.
-  console.log("[TossAds] Dev Mode: Simulating Ad delay...");
-  
-  setTimeout(() => {
-    console.log("[TossAds] Dev Mode: Reward Granted");
-    onReward(); 
-  }, 1500);
+  ensureAdMobInitialized()
+    .then(() => {
+      console.log('[AdMob] Initialized');
+    })
+    .catch((err) => {
+      console.warn('[AdMob] Init failed:', err);
+    });
 };
+
+/**
+ * Shows rewarded ad.
+ * - Native app: Google AdMob rewarded
+ * - Local web dev: simulated reward fallback
+ * - Non-local web: dismiss
+ */
+export const showRewardAd = (onReward: () => void, onDismiss: () => void) => {
+  const run = async () => {
+    if (!isNativeApp()) {
+      if (!isLocalWeb()) {
+        onDismiss();
+        return;
+      }
+
+      console.log('[AdMob] Web dev mode: simulating rewarded ad.');
+      setTimeout(() => onReward(), 1200);
+      return;
+    }
+
+    const plugin = getAdMobPlugin();
+    if (!plugin || typeof plugin.prepareRewardVideoAd !== 'function' || typeof plugin.showRewardVideoAd !== 'function') {
+      console.warn('[AdMob] Rewarded API is unavailable in current native runtime.');
+      onDismiss();
+      return;
+    }
+
+    let rewarded = false;
+    let settled = false;
+    const listenerHandles: Array<ListenerHandle | null> = [];
+
+    const settleReward = async () => {
+      if (settled) return;
+      settled = true;
+      await cleanupListeners(listenerHandles);
+      onReward();
+    };
+
+    const settleDismiss = async () => {
+      if (settled) return;
+      settled = true;
+      await cleanupListeners(listenerHandles);
+      onDismiss();
+    };
+
+    listenerHandles.push(await addAdMobListener('onRewardedVideoAdReward', async () => {
+      rewarded = true;
+      await settleReward();
+    }));
+    listenerHandles.push(await addAdMobListener('onRewardedVideoAdDismissed', async () => {
+      if (!rewarded) {
+        await settleDismiss();
+      }
+    }));
+    listenerHandles.push(await addAdMobListener('onRewardedVideoAdFailedToLoad', async () => {
+      await settleDismiss();
+    }));
+    listenerHandles.push(await addAdMobListener('onRewardedVideoAdFailedToShow', async () => {
+      await settleDismiss();
+    }));
+
+    try {
+      await ensureAdMobInitialized();
+
+      const adId = getRewardedAdUnitId();
+      console.log(`[AdMob] Requesting rewarded ad (${getPlatform()})`);
+
+      await plugin.prepareRewardVideoAd({
+        adId,
+        isTesting: isTestingMode(),
+      });
+      await plugin.showRewardVideoAd();
+
+      setTimeout(async () => {
+        if (!settled && !rewarded) {
+          await settleDismiss();
+        }
+      }, 25000);
+    } catch (error) {
+      console.error('[AdMob] Rewarded flow failed:', error);
+      await settleDismiss();
+    }
+  };
+
+  void run();
+};
+

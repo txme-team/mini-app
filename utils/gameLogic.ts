@@ -1,5 +1,6 @@
 
 import { Point, TileData, TileType } from '../types';
+import { CHARACTER_COUNT } from '../constants/characters';
 
 // Check if a point is within grid bounds
 export const isValidPoint = (p: Point, rows: number, cols: number): boolean => {
@@ -129,7 +130,12 @@ export const findAvailableMatch = (board: (TileData | null)[][]): { tile1: TileD
 };
 
 // Initialize Board with 1-tile padding
-export const createBoard = (rows: number, cols: number, tileTypesCount: number): (TileData | null)[][] => {
+export const createBoard = (
+  rows: number,
+  cols: number,
+  tileTypesCount: number,
+  tileTypePool?: number[]
+): (TileData | null)[][] => {
   // We assume rows/cols includes the padding. 
   // Playable area is (rows-2) x (cols-2).
   const playRows = rows - 2;
@@ -142,12 +148,37 @@ export const createBoard = (rows: number, cols: number, tileTypesCount: number):
     throw new Error("Playable board size must be even");
   }
 
+  const explicitPool = Array.isArray(tileTypePool)
+    ? Array.from(
+        new Set(
+          tileTypePool.filter(
+            (type): type is number =>
+              Number.isInteger(type) && type >= 1 && type <= CHARACTER_COUNT
+          )
+        )
+      )
+    : [];
+
+  const maxSelectableTypes = explicitPool.length > 0 ? explicitPool.length : CHARACTER_COUNT;
+  const safeTileTypesCount = Math.max(1, Math.min(tileTypesCount, maxSelectableTypes));
+
+  let selectedTypes: number[];
+  if (explicitPool.length > 0) {
+    selectedTypes = explicitPool.slice(0, safeTileTypesCount);
+  } else {
+    const availableTypes = Array.from({ length: CHARACTER_COUNT }, (_, idx) => idx + 1);
+    for (let i = availableTypes.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [availableTypes[i], availableTypes[j]] = [availableTypes[j], availableTypes[i]];
+    }
+    selectedTypes = availableTypes.slice(0, safeTileTypesCount);
+  }
+
   const pairsNeeded = totalTiles / 2;
   const tiles: TileType[] = [];
 
   for (let i = 0; i < pairsNeeded; i++) {
-    // Generate types 1..tileTypesCount, looping if needed
-    const type = (i % tileTypesCount) + 1;
+    const type = selectedTypes[i % safeTileTypesCount];
     tiles.push(type, type);
   }
 

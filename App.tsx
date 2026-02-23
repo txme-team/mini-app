@@ -1,17 +1,18 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createBoard, findPath, hasPossibleMoves, shuffleBoard, findAvailableMatch } from './utils/gameLogic';
-import { soundManager } from './utils/audio';
-import { db, RankingEntry } from './utils/db'; 
-import { initAds, showRewardAd } from './utils/ads'; 
+import { evaluateMatchReward, shouldRunGameTimer } from './utils/gameSession';
+import { platformServices } from './services/platformServices';
 import { AuthProvider, useAuth } from './contexts/AuthContext'; 
 import LoginScreen from './components/LoginScreen'; 
+import AppErrorBoundary from './components/AppErrorBoundary';
 import { 
   GameState, 
   TileData, 
   Path, 
   LevelConfig,
-  FloatingTextData
+  FloatingTextData,
+  RankingEntry
 } from './types';
 import { 
   LEVEL_CONFIGS, 
@@ -22,7 +23,7 @@ import {
   BOARD_COLS,
   BOARD_ROWS
 } from './constants';
-import { GearIcon, ShuffleIcon, StarIcon, ClockIcon, HintIcon, SoundOnIcon, SoundOffIcon, VideoIcon } from './components/Icons';
+import { ShuffleIcon, HintIcon, SoundOnIcon, SoundOffIcon, VideoIcon, PauseIcon, PlayIcon, ClockIcon, StarIcon, CoinIcon } from './components/Icons';
 
 import Board from './components/Board';
 import { 
@@ -35,6 +36,7 @@ import {
 
 // Separated Game Component to use Auth Context
 const GameApp: React.FC = () => {
+  const { sound, userData, ads } = platformServices;
   const { user, logout } = useAuth(); // Get logged in user and logout function
   
   const [gameState, setGameState] = useState<GameState>({
@@ -53,7 +55,7 @@ const GameApp: React.FC = () => {
   const [connectionPath, setConnectionPath] = useState<Path | null>(null);
   
   const [showHelp, setShowHelp] = useState(true);
-  const [showSettings, setShowSettings] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isLoadingAd, setIsLoadingAd] = useState(false);
   const [isShuffling, setIsShuffling] = useState(false);
@@ -66,17 +68,19 @@ const GameApp: React.FC = () => {
   const lastMatchTime = useRef<number>(0);
   const [floatingTexts, setFloatingTexts] = useState<FloatingTextData[]>([]);
   const [isScoreAnimating, setIsScoreAnimating] = useState(false);
+  const endingSfxPlayedRef = useRef(false);
 
   // Ranking State for Modals
   const [rankings, setRankings] = useState<RankingEntry[]>([]);
 
   // Init Ads
   useEffect(() => {
-    initAds();
-  }, []);
+    ads.init();
+  }, [ads]);
 
   // --- Back Button Handling (History API) ---
   useEffect(() => {
+    if (typeof window === 'undefined') return;
     const handlePopState = (event: PopStateEvent) => {
         // Just prevent back navigation for now in PWA context
     };
@@ -87,8 +91,9 @@ const GameApp: React.FC = () => {
   // --- iOS Audio Unlocker ---
   // Attaches a one-time listener to the window to unlock audio on the very first touch anywhere.
   useEffect(() => {
+    if (typeof window === 'undefined') return;
     const unlockAudio = () => {
-      soundManager.init();
+      sound.init();
       // Remove after first interaction
       window.removeEventListener('touchstart', unlockAudio);
       window.removeEventListener('click', unlockAudio);
@@ -106,7 +111,12 @@ const GameApp: React.FC = () => {
 
   const startLevel = useCallback((level: number) => {
     const config: LevelConfig = LEVEL_CONFIGS[level];
-    const newBoard = createBoard(config.rows, config.cols, config.tileTypesCount);
+    const newBoard = createBoard(
+      config.rows,
+      config.cols,
+      config.tileTypesCount,
+      config.tileTypePool
+    );
     
     setBoard(newBoard);
     setGameState(prev => ({
@@ -125,7 +135,8 @@ const GameApp: React.FC = () => {
     lastMatchTime.current = 0;
     setFloatingTexts([]);
     setRankings([]); 
-    setShowSettings(false);
+    setIsPaused(false);
+    endingSfxPlayedRef.current = false;
   }, []);
 
   const restartGame = async () => {
@@ -138,6 +149,8 @@ const GameApp: React.FC = () => {
       isGameOver: false,
       isLevelComplete: false,
     }));
+    setIsPaused(false);
+    endingSfxPlayedRef.current = false;
     startLevel(1);
   };
 
@@ -145,7 +158,16 @@ const GameApp: React.FC = () => {
   useEffect(() => {
     let timer: number;
     // Timer pauses when help or settings are open
-    if (gameState.isPlaying && !gameState.isGameOver && !gameState.isLevelComplete && !showHelp && !showSettings && !isLoadingAd && !isShuffling && !adConfirmType) {
+    if (shouldRunGameTimer({
+      isPlaying: gameState.isPlaying,
+      isGameOver: gameState.isGameOver,
+      isLevelComplete: gameState.isLevelComplete,
+      showHelp,
+      showSettings: isPaused,
+      isLoadingAd,
+      isShuffling,
+      hasAdConfirm: !!adConfirmType,
+    })) {
       timer = window.setInterval(async () => {
         setGameState(prev => {
           if (prev.timeLeft <= 1) {
@@ -156,15 +178,15 @@ const GameApp: React.FC = () => {
       }, 1000);
     }
     return () => clearInterval(timer);
-  }, [gameState.isPlaying, gameState.isGameOver, gameState.isLevelComplete, showHelp, showSettings, isLoadingAd, isShuffling, adConfirmType]);
+  }, [gameState.isPlaying, gameState.isGameOver, gameState.isLevelComplete, showHelp, isPaused, isLoadingAd, isShuffling, adConfirmType]);
 
   // Game Over
   useEffect(() => {
     if (gameState.isGameOver && gameState.timeLeft === 0) {
-        soundManager.playError();
+        sound.playGameOver();
         const finishGame = async () => {
-            await db.saveScore(gameState.score);
-            const r = await db.getRankings(gameState.score);
+            await userData.saveScore(gameState.score);
+            const r = await userData.getRankings(gameState.score);
             setRankings(r);
         };
         finishGame();
@@ -175,9 +197,9 @@ const GameApp: React.FC = () => {
   // --- Logic ---
 
   const handleTileClick = (clickedTile: TileData) => {
-    if (!gameState.isPlaying || gameState.isGameOver || connectionPath || secondSelectedTile || showSettings || isLoadingAd || isShuffling || adConfirmType) return; 
+    if (!gameState.isPlaying || gameState.isGameOver || connectionPath || secondSelectedTile || isPaused || isLoadingAd || isShuffling || adConfirmType) return; 
 
-    soundManager.playSelect();
+    sound.playSelect();
 
     if (!selectedTile) {
       setSelectedTile(clickedTile);
@@ -218,34 +240,21 @@ const GameApp: React.FC = () => {
   };
 
   const handleMatch = (tile1: TileData, tile2: TileData, path: Path) => {
-    soundManager.playMatchSuccess();
+    sound.playMatchSuccess();
     setConnectionPath(path);
 
     const now = Date.now();
-    const timeDiff = now - lastMatchTime.current;
-    
-    const isCombo = lastMatchTime.current > 0 && timeDiff < 1000;
-    
-    let newCombo = 0;
-    let points = SCORE_PER_MATCH;
-    let subText = undefined;
+    const reward = evaluateMatchReward({
+      combo,
+      lastMatchTime: lastMatchTime.current,
+      now,
+      scorePerMatch: SCORE_PER_MATCH,
+    });
 
-    if (isCombo) {
-        newCombo = combo + 1;
-        points += 100; 
-        subText = `Combo x${newCombo} 🔥`;
-    } else {
-        newCombo = 1;
-    }
-
-    setCombo(newCombo);
+    setCombo(reward.newCombo);
     lastMatchTime.current = now;
 
-    // Add +2s logic text
-    const timeBonusText = "+2s";
-    const finalSubText = subText ? `${subText} ${timeBonusText}` : timeBonusText;
-
-    addFloatingText(`+${points}`, finalSubText, isCombo ? 'combo' : 'normal');
+    addFloatingText(`+${reward.points}`, reward.finalSubText, reward.isCombo ? 'combo' : 'normal');
     triggerScoreAnimation();
     
     setTimeout(() => {
@@ -260,7 +269,7 @@ const GameApp: React.FC = () => {
         
         const remainingTiles = newBoard.flat().filter(t => t && !t.isMatched).length;
         if (remainingTiles === 0) {
-           handleLevelComplete(gameState.score + points);
+           handleLevelComplete(gameState.score + reward.points);
         } else if (!hasPossibleMoves(newBoard)) {
              return shuffleBoard(newBoard);
         }
@@ -269,7 +278,7 @@ const GameApp: React.FC = () => {
 
       setGameState(prev => ({
         ...prev,
-        score: prev.score + points,
+        score: prev.score + reward.points,
         timeLeft: prev.timeLeft + 2, // Bonus time!
       }));
       
@@ -280,7 +289,7 @@ const GameApp: React.FC = () => {
   };
 
   const handleMismatch = (secondTile: TileData) => {
-    soundManager.playError();
+    sound.playError();
     setErrorTile(secondTile);
     setCombo(0); 
     
@@ -299,14 +308,14 @@ const GameApp: React.FC = () => {
   // --- Ad Based Actions ---
 
   const handleHintClick = () => {
-    if (!gameState.isPlaying || showSettings || connectionPath || isLoadingAd || isShuffling) return;
-    soundManager.playSelect();
+    if (!gameState.isPlaying || isPaused || connectionPath || isLoadingAd || isShuffling) return;
+    sound.playSelect();
     setAdConfirmType('hint');
   };
 
   const handleShuffleClick = () => {
-    if (!gameState.isPlaying || showSettings || connectionPath || isLoadingAd || isShuffling) return;
-    soundManager.playSelect();
+    if (!gameState.isPlaying || isPaused || connectionPath || isLoadingAd || isShuffling) return;
+    sound.playSelect();
     setAdConfirmType('shuffle');
   };
 
@@ -320,7 +329,7 @@ const GameApp: React.FC = () => {
         setIsLoadingAd(false);
     }, 5000);
 
-    showRewardAd(
+    ads.showRewardAd(
       async () => {
         // Success
         clearTimeout(safetyTimer);
@@ -329,7 +338,7 @@ const GameApp: React.FC = () => {
         if (type === 'hint') {
             const match = findAvailableMatch(board);
             if (match) {
-                soundManager.playStoreSuccess();
+                sound.playStoreSuccess();
                 setSelectedTile(match.tile1);
                 setSecondSelectedTile(match.tile2);
                 setTimeout(() => {
@@ -339,10 +348,10 @@ const GameApp: React.FC = () => {
         } else if (type === 'shuffle') {
             // Start Shuffle Animation
             setIsShuffling(true);
-            soundManager.playSelect(); 
+            sound.playSelect(); 
 
             setTimeout(() => {
-                soundManager.playStoreSuccess();
+                sound.playStoreSuccess();
                 setBoard(prev => shuffleBoard(prev));
                 setIsShuffling(false);
                 addFloatingText("SHUFFLE!", "", 'combo');
@@ -353,20 +362,27 @@ const GameApp: React.FC = () => {
         // Dismissed/Failed
         clearTimeout(safetyTimer);
         setIsLoadingAd(false);
-        soundManager.playError();
+        sound.playError();
       }
     );
   };
 
   const handleAdCancel = () => {
-    soundManager.playSelect();
+    sound.playSelect();
     setAdConfirmType(null);
   };
 
   const handleLevelComplete = async (finalScore: number) => {
-    soundManager.playLevelComplete();
-    await db.saveScore(finalScore);
-    const r = await db.getRankings(finalScore);
+    if (gameState.level >= MAX_LEVEL) {
+      if (!endingSfxPlayedRef.current) {
+        sound.playEndingCelebration();
+        endingSfxPlayedRef.current = true;
+      }
+    } else {
+      sound.playLevelComplete();
+    }
+    await userData.saveScore(finalScore);
+    const r = await userData.getRankings(finalScore);
     setRankings(r);
 
     setGameState(prev => ({
@@ -374,6 +390,7 @@ const GameApp: React.FC = () => {
         isLevelComplete: true,
         isPlaying: false 
     }));
+    setIsPaused(false);
     setCombo(0);
     setFloatingTexts([]);
   };
@@ -385,15 +402,31 @@ const GameApp: React.FC = () => {
     }
   };
 
-  const toggleSettings = () => {
-    setShowSettings(!showSettings);
-    soundManager.playSelect();
+  const togglePause = () => {
+    if (!gameState.isPlaying || gameState.isGameOver || gameState.isLevelComplete || isLoadingAd || isShuffling || !!adConfirmType) {
+      return;
+    }
+    setIsPaused(prev => !prev);
+    sound.playSelect();
   };
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handlePauseShortcut = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 'p') return;
+      event.preventDefault();
+      togglePause();
+    };
+
+    window.addEventListener('keydown', handlePauseShortcut);
+    return () => window.removeEventListener('keydown', handlePauseShortcut);
+  }, [gameState.isPlaying, gameState.isGameOver, gameState.isLevelComplete, isLoadingAd, isShuffling, adConfirmType]);
+
   const toggleMute = () => {
-    const muted = soundManager.toggleMute();
+    const muted = sound.toggleMute();
     setIsMuted(muted);
-    soundManager.playSelect();
+    sound.playSelect();
   };
 
   const formatTime = (seconds: number) => {
@@ -403,7 +436,7 @@ const GameApp: React.FC = () => {
   };
 
   return (
-    <div className="relative h-screen w-full flex flex-col items-center justify-center font-[DotGothic16] p-2 pt-[calc(0.5rem+env(safe-area-inset-top))] pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+    <div className="relative h-screen w-full flex flex-col items-center justify-center p-1 pt-[calc(0.25rem+env(safe-area-inset-top))] pb-[calc(0.25rem+env(safe-area-inset-bottom))]">
       
       {/* Floating Text Overlay */}
       <div className="absolute inset-0 pointer-events-none z-50 overflow-hidden">
@@ -420,63 +453,45 @@ const GameApp: React.FC = () => {
         ))}
       </div>
 
-      <div className="w-full max-w-[480px] md:max-w-[600px] lg:max-w-[800px] bg-white border-4 border-blue-900 shadow-[8px_8px_0_rgba(0,0,0,0.2)] p-1 flex flex-col h-full max-h-[90vh]">
+      <div className="w-full max-w-[560px] md:max-w-[680px] ui-shell pixel-sheet-corner p-1 flex flex-col h-full max-h-[96vh] overflow-hidden">
         
         {/* Header Bar */}
-        <div className="bg-blue-100 border-b-4 border-blue-900 p-2 flex items-center justify-between shrink-0 mb-1 relative h-16">
-           
-           {/* Left: Settings Button */}
-           <button 
-              onClick={toggleSettings} 
-              className="w-10 h-10 bg-white border-2 border-blue-900 shadow-[2px_2px_0_rgba(0,0,0,0.1)] flex items-center justify-center text-blue-900 active:translate-y-0.5 active:shadow-none z-20"
-           >
-              <div className="w-6 h-6"><GearIcon /></div>
-           </button>
-
-           {/* Settings Menu Overlay */}
-           {showSettings && (
-             <div className="absolute top-14 left-2 z-50 bg-white border-4 border-blue-900 shadow-xl p-2 flex flex-col gap-2 w-40 animate-pixel-bounce origin-top-left items-center text-center">
-                <button onClick={toggleMute} className="w-full flex items-center justify-center gap-2 p-2 hover:bg-blue-50 border-2 border-transparent hover:border-blue-200">
-                   <div className="w-5 h-5">{isMuted ? <SoundOffIcon /> : <SoundOnIcon />}</div>
-                   <span className="font-bold text-sm">{isMuted ? "소리 켜기" : "소리 끄기"}</span>
-                </button>
-                <button onClick={restartGame} className="w-full flex items-center justify-center gap-2 p-2 hover:bg-blue-50 border-2 border-transparent hover:border-blue-200 text-red-500">
-                   <span className="font-bold text-sm">다시 시작</span>
-                </button>
-             </div>
-           )}
-           
-           {/* Center: Big Timer */}
-           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
-               <div className={`flex items-center gap-2 text-4xl font-black tracking-widest ${gameState.timeLeft < 10 ? 'text-red-500 animate-pulse' : 'text-blue-900'}`}>
-                  {formatTime(gameState.timeLeft)}
-               </div>
-           </div>
-
-           {/* Right: Score & Level (Small) */}
-           <div className="flex flex-col items-end justify-center text-blue-900">
-               <div className="flex items-center gap-1">
-                   <div className="w-3 h-3"><StarIcon /></div>
-                   <span className={`font-bold text-lg transition-transform ${isScoreAnimating ? 'animate-score-bump' : ''}`}>
-                      {gameState.score}
-                   </span>
-               </div>
-               <div className="text-xs font-bold opacity-70">
-                   Lv.{gameState.level}
-               </div>
-           </div>
+        <div className="ui-header px-2 py-2 shrink-0 mb-1">
+          <div className="grid grid-cols-3 gap-2 items-stretch">
+            <div className="!h-[52px] px-3 flex flex-col items-start justify-center gap-0.5 border border-[#7ea9c8] rounded-[6px] bg-[linear-gradient(180deg,#f8fcff_0%,#dceefa_100%)]">
+              <span className="text-[10px] font-semibold tracking-[0.08em] text-[#4a6f8f]">LEVEL</span>
+              <span className="text-[18px] leading-none font-semibold text-[#2d5d88] flex items-center gap-1">
+                <span className="w-4 h-4"><StarIcon /></span>
+                <span>{gameState.level}</span>
+              </span>
+            </div>
+            <div className={`!h-[52px] px-3 flex flex-col items-start justify-center gap-0.5 border border-[#7ea9c8] rounded-[6px] bg-[linear-gradient(180deg,#f8fcff_0%,#dceefa_100%)] ${gameState.timeLeft < 10 ? 'text-[#ff6e57] animate-pulse' : ''}`}>
+              <span className="text-[10px] font-semibold tracking-[0.08em] text-[#4a6f8f]">TIME</span>
+              <span className="text-[18px] leading-none font-semibold text-[#2d5d88] flex items-center gap-1">
+                <span className="w-4 h-4"><ClockIcon /></span>
+                <span>{formatTime(gameState.timeLeft)}</span>
+              </span>
+            </div>
+            <div className={`!h-[52px] px-3 flex flex-col items-start justify-center gap-0.5 border border-[#7ea9c8] rounded-[6px] bg-[linear-gradient(180deg,#f8fcff_0%,#dceefa_100%)] ${isScoreAnimating ? 'animate-score-bump' : ''}`}>
+              <span className="text-[10px] font-semibold tracking-[0.08em] text-[#4a6f8f]">SCORE</span>
+              <span className="text-[18px] leading-none font-semibold text-[#2d5d88] flex items-center gap-1">
+                <span className="w-4 h-4"><CoinIcon /></span>
+                <span>{gameState.score}</span>
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* Game Screen */}
-        <div className="flex-grow bg-retro-grid border-4 border-blue-900 relative overflow-hidden flex items-center justify-center p-2">
+        <div className="flex-grow relative overflow-hidden flex items-center justify-center p-1.5 border border-[#7ea9c8] rounded-[6px] bg-[linear-gradient(180deg,#e6f1fa_0%,#d5e7f5_100%)] shadow-[inset_0_0_0_1px_#f7fcff]">
             {board.length > 0 && (
                 <div 
-                  className="relative shadow-sm"
+                  className="relative shadow-sm h-full w-full flex items-center justify-center"
                   style={{ 
-                    aspectRatio: `${BOARD_COLS}/${BOARD_ROWS}`,
-                    height: '100%', 
+                    aspectRatio: `${BOARD_COLS - 2}/${BOARD_ROWS - 2}`,
+                    height: '100%',
                     width: 'auto',
-                    maxWidth: '100%'
+                    maxWidth: '100%',
                   }}
                 >
                     <Board 
@@ -486,7 +501,7 @@ const GameApp: React.FC = () => {
                         errorTile={errorTile}
                         onTileClick={handleTileClick}
                         connectionPath={connectionPath}
-                        isPaused={false}
+                        isPaused={isPaused}
                         isShuffling={isShuffling}
                     />
                 </div>
@@ -496,22 +511,40 @@ const GameApp: React.FC = () => {
             {isLoadingAd && (
                 <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center text-white">
                     <div className="w-12 h-12 mb-4 animate-spin rounded-full border-4 border-white border-t-transparent"></div>
-                    <div className="font-bold text-xl">광고 불러오는 중...</div>
+                    <div className="font-medium text-lg">광고 불러오는 중...</div>
                 </div>
             )}
         </div>
 
         {/* Bottom Controls */}
-        <div className="mt-1 shrink-0 flex gap-2 h-14">
+        <div className="mt-1 shrink-0 flex gap-2 h-[64px] ui-header p-1.5">
+           <button
+             onClick={toggleMute}
+             className="retro-icon-btn pixel-btn-corner !w-[64px] !h-full shrink-0"
+             aria-label={isMuted ? '소리 켜기' : '소리 끄기'}
+             title={isMuted ? 'SOUND ON' : 'SOUND OFF'}
+           >
+             <div className="w-8 h-8">{isMuted ? <SoundOffIcon /> : <SoundOnIcon />}</div>
+           </button>
+
+            <button
+             onClick={togglePause}
+             className="retro-icon-btn pixel-btn-corner !w-[64px] !h-full shrink-0"
+             aria-label={isPaused ? '게임 재개' : '게임 일시정지'}
+             title={isPaused ? 'RESUME' : 'PAUSE'}
+            >
+             <div className="w-8 h-8">{isPaused ? <PlayIcon /> : <PauseIcon />}</div>
+            </button>
+
            {/* Hint Button */}
            <button 
              onClick={handleHintClick}
-             className="flex-1 bg-yellow-400 border-4 border-blue-900 shadow-[4px_4px_0_rgba(0,0,0,0.2)] flex items-center justify-center gap-2 text-white active:translate-y-1 active:shadow-none hover:bg-yellow-300 transition-colors"
+             className="flex-1 ui-action-hint pixel-btn-corner flex items-center justify-center gap-3 px-3 py-2 text-[#5b360f] active:translate-y-1 active:shadow-none transition-colors"
            >
-              <div className="w-6 h-6"><HintIcon /></div>
-              <div className="flex flex-col items-start leading-none">
-                 <span className="font-black text-lg">HINT</span>
-                 <div className="flex items-center gap-1 text-[10px] bg-black/20 px-1.5 py-0.5 rounded-full">
+              <div className="w-10 h-10"><HintIcon /></div>
+              <div className="flex items-center gap-2 leading-none">
+                 <span className="font-bold text-sm">HINT</span>
+                 <div className="flex items-center gap-1 text-[10px] bg-black/20 px-2 py-0.5 pixel-btn-corner-sm border border-white/20">
                     <div className="w-3 h-3"><VideoIcon /></div>
                     <span>AD</span>
                  </div>
@@ -521,12 +554,12 @@ const GameApp: React.FC = () => {
            {/* Shuffle Button */}
            <button 
              onClick={handleShuffleClick}
-             className="flex-1 bg-blue-500 border-4 border-blue-900 shadow-[4px_4px_0_rgba(0,0,0,0.2)] flex items-center justify-center gap-2 text-white active:translate-y-1 active:shadow-none hover:bg-blue-400 transition-colors"
+             className="flex-1 ui-action-shuffle pixel-btn-corner flex items-center justify-center gap-3 px-3 py-2 text-[#5b360f] active:translate-y-1 active:shadow-none transition-colors"
            >
-              <div className="w-6 h-6"><ShuffleIcon /></div>
-              <div className="flex flex-col items-start leading-none">
-                 <span className="font-black text-lg">SHUFFLE</span>
-                 <div className="flex items-center gap-1 text-[10px] bg-black/20 px-1.5 py-0.5 rounded-full">
+              <div className="w-10 h-10"><ShuffleIcon /></div>
+              <div className="flex items-center gap-2 leading-none">
+                 <span className="font-bold text-sm">SHUFFLE</span>
+                 <div className="flex items-center gap-1 text-[10px] bg-black/20 px-2 py-0.5 pixel-btn-corner-sm border border-white/20">
                     <div className="w-3 h-3"><VideoIcon /></div>
                     <span>AD</span>
                  </div>
@@ -538,8 +571,12 @@ const GameApp: React.FC = () => {
 
       {showHelp && (
         <HelpModal onClose={() => {
-            soundManager.init();
-            window.history.pushState({ page: 'game' }, '', '');
+            sound.init();
+            try {
+              window.history.pushState({ page: 'game' }, '', '');
+            } catch (error) {
+              console.warn('history.pushState failed:', error);
+            }
             setShowHelp(false);
             if (!gameState.isPlaying && gameState.level === 1) {
                 startLevel(1);
@@ -560,7 +597,6 @@ const GameApp: React.FC = () => {
           <GameOverModal 
             score={gameState.score} 
             onRestart={restartGame} 
-            rankings={rankings}
           />
       )}
 
@@ -580,6 +616,7 @@ const GameApp: React.FC = () => {
              />
           )
       )}
+
     </div>
   );
 };
@@ -587,9 +624,11 @@ const GameApp: React.FC = () => {
 // Root Component that handles Switching
 const App: React.FC = () => {
     return (
-        <AuthProvider>
-            <AuthConsumer />
-        </AuthProvider>
+        <AppErrorBoundary>
+          <AuthProvider>
+              <AuthConsumer />
+          </AuthProvider>
+        </AppErrorBoundary>
     );
 }
 
@@ -599,7 +638,7 @@ const AuthConsumer: React.FC = () => {
     if (isLoading) {
         return (
              <div className="h-screen w-screen bg-retro-stripe flex items-center justify-center">
-                 <div className="text-2xl font-black text-blue-900 animate-bounce">LOADING...</div>
+                 <div className="text-xl font-bold text-[#fff2c6] animate-bounce" style={{ textShadow: '2px 2px 0 #1a2242' }}>LOADING...</div>
              </div>
         );
     }

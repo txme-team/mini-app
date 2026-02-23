@@ -1,18 +1,18 @@
 
-import React, { useState } from 'react';
-import { TrophyIcon, SadDogIcon, PartyIcon, HintIcon, VideoIcon } from './Icons';
-import { RankingEntry } from '../utils/db';
-import { soundManager } from '../utils/audio';
+import React from 'react';
+import { HintIcon, ShuffleIcon } from './Icons';
+import { RankingEntry } from '../types';
 
 // Reusable Modal Wrapper
 interface ModalOverlayProps {
   children: React.ReactNode;
   containerClass?: string;
+  animated?: boolean;
 }
 
-const ModalOverlay: React.FC<ModalOverlayProps> = ({ children, containerClass }) => (
-  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-    <div className={containerClass || "bg-sky-50 p-6 border-[6px] border-blue-900 shadow-[8px_8px_0_rgba(0,0,0,0.5)] max-w-sm w-[90%] text-center relative flex flex-col items-center max-h-[90vh]"}>
+const ModalOverlay: React.FC<ModalOverlayProps> = ({ children, containerClass, animated = false }) => (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#183149]/55 backdrop-blur-[1px]">
+    <div className={`${containerClass || "pixel-sheet-corner bg-[#d4e8f7] p-4 border border-[#1f4e7e] shadow-[3px_3px_0_#78aacd] max-w-sm w-[90%] text-center relative flex flex-col items-center max-h-[90vh]"} ${animated ? 'animate-pop-in' : ''}`}>
       {children}
     </div>
   </div>
@@ -25,11 +25,20 @@ interface ButtonProps {
   disabled?: boolean;
 }
 
+const MODAL_BTN_BASE =
+  'py-2.5 px-4 text-sm font-normal border border-[#7ea9c8] pixel-btn-corner shadow-[1px_1px_0_rgba(45,92,124,0.22)] active:translate-y-1 active:shadow-none transition-all';
+
 const ActionButton: React.FC<ButtonProps> = ({ onClick, children, colorClass = 'glossy-blue', disabled = false }) => (
   <button
     onClick={onClick}
     disabled={disabled}
-    className={`w-full py-4 px-6 text-xl font-black mt-4 btn-pixel-glossy uppercase tracking-widest shadow-xl active:translate-y-2 active:shadow-none transition-all ${colorClass} ${disabled ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}
+    className={`w-full mt-3 ${MODAL_BTN_BASE} ${
+      colorClass === 'glossy-green'
+        ? 'bg-[linear-gradient(180deg,#f8fcff_0%,#deeffa_100%)] text-[#365c7c]'
+        : colorClass === 'glossy-pink'
+          ? 'bg-[linear-gradient(180deg,#f8fcff_0%,#dceefa_100%)] text-[#365c7c]'
+          : 'bg-[linear-gradient(180deg,#f8fcff_0%,#dceefa_100%)] text-[#365c7c]'
+    } ${disabled ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}
   >
     {children}
   </button>
@@ -43,32 +52,77 @@ interface RankingItemProps {
 }
 
 const RankingItem: React.FC<RankingItemProps> = ({ rank, name, score, isUser }) => (
-  <div className={`w-full flex items-center justify-between p-2 mb-2 border-2 border-blue-900 ${isUser ? 'bg-yellow-100 scale-[1.02] border-yellow-500 shadow-sm' : 'bg-white'}`}>
+  <div className={`w-full flex items-center justify-between p-2 mb-2 pixel-btn-corner-sm ${isUser ? 'bg-[#ffe6ac] scale-[1.02] shadow-sm' : 'bg-[#f3fbff]'}`}>
      <div className="flex items-center gap-3 overflow-hidden">
-        <span className={`shrink-0 w-8 h-6 flex items-center justify-center text-xs font-bold border-2 border-black ${rank === 1 ? 'bg-yellow-400' : rank === 2 ? 'bg-slate-300' : rank === 3 ? 'bg-orange-300' : 'bg-slate-200'}`}>
+        <span className={`shrink-0 w-8 h-6 flex items-center justify-center text-xs font-bold ${rank === 1 ? 'bg-yellow-400' : rank === 2 ? 'bg-slate-300' : rank === 3 ? 'bg-orange-300' : 'bg-slate-200'}`}>
            {rank}
         </span>
-        <span className={`text-base truncate ${isUser ? 'font-bold text-black' : 'text-slate-600'}`}>{name}</span>
+        <span className={`text-sm truncate ${isUser ? 'font-semibold text-[#1f4e7e]' : 'text-[#336588]'}`}>{name}</span>
      </div>
-     <span className={`font-bold shrink-0 ${isUser ? 'text-red-600' : 'text-slate-600'}`}>{score.toLocaleString()}</span>
+     <span className={`font-medium shrink-0 text-sm ${isUser ? 'text-[#b45b1a]' : 'text-[#336588]'}`}>{score.toLocaleString()}</span>
   </div>
 );
+
+const CONFETTI_COLORS = ['#ffe8a8', '#ffd15a', '#6cd3ff', '#85e6be', '#f8f6ef', '#ff9db0'];
+
+const PixelConfettiBurst: React.FC = () => {
+  const particles = Array.from({ length: 56 }, (_, i) => {
+    const angle = (Math.PI * 2 * i) / 56;
+    const distance = 34 + (i % 6) * 9;
+    const dx = Math.round(Math.cos(angle) * distance);
+    const dy = Math.round(Math.sin(angle) * distance) - 8;
+    return {
+      id: i,
+      color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+      dx,
+      dy,
+      delay: (i % 8) * 0.06,
+      duration: 0.75 + (i % 4) * 0.1,
+      size: 3 + (i % 3),
+    };
+  });
+
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden z-20">
+      {particles.map((p) => (
+        <span
+          key={p.id}
+          className="pixel-confetti-dot"
+          style={{
+            left: '50%',
+            top: '38%',
+            width: `${p.size}px`,
+            height: `${p.size}px`,
+            backgroundColor: p.color,
+            animationName: 'pixel-confetti-burst',
+            animationDuration: `${p.duration}s`,
+            animationTimingFunction: 'steps(8, end)',
+            animationIterationCount: 'infinite',
+            animationDelay: `${p.delay}s`,
+            ['--dx' as any]: `${p.dx}px`,
+            ['--dy' as any]: `${p.dy}px`,
+          }}
+        />
+      ))}
+    </div>
+  );
+};
 
 // Visual Separator for large rank gaps
 const RankSeparator = () => (
   <div className="w-full flex justify-center items-center py-1 mb-2">
       <div className="flex gap-1">
-          <div className="w-1.5 h-1.5 bg-blue-900/40 rounded-full"></div>
-          <div className="w-1.5 h-1.5 bg-blue-900/40 rounded-full"></div>
-          <div className="w-1.5 h-1.5 bg-blue-900/40 rounded-full"></div>
+          <div className="w-1.5 h-1.5 bg-[#2a3356]/40 rounded-full"></div>
+          <div className="w-1.5 h-1.5 bg-[#2a3356]/40 rounded-full"></div>
+          <div className="w-1.5 h-1.5 bg-[#2a3356]/40 rounded-full"></div>
       </div>
   </div>
 );
 
 const RankingView = ({ rankings }: { rankings: RankingEntry[] }) => {
   return (
-    <div className="w-full mt-4 mb-2 text-left bg-white border-4 border-blue-900 p-2">
-       <h3 className="text-sm font-bold text-blue-900 uppercase mb-3 text-center border-b-2 border-blue-900 pb-1">GLOBAL RANKING</h3>
+    <div className="w-full mt-4 mb-2 text-left bg-[#f1fbff] p-2 pixel-btn-corner">
+       <h3 className="text-xs font-semibold text-[#1f4e7e] uppercase mb-2 text-center">GLOBAL RANKING</h3>
        {rankings.length === 0 ? (
          <div className="text-center text-gray-400 py-4">Loading...</div>
        ) : (
@@ -94,96 +148,129 @@ const RankingView = ({ rankings }: { rankings: RankingEntry[] }) => {
   );
 };
 
-export const GameOverModal = ({ score, onRestart, rankings }: { score: number; onRestart: () => void; rankings: RankingEntry[] }) => (
-  <ModalOverlay>
-    <div className="w-20 h-20 mx-auto mb-2">
-      <SadDogIcon />
+export const GameOverModal = ({ score, onRestart }: { score: number; onRestart: () => void }) => (
+  <ModalOverlay animated>
+    <div className="w-full mb-4 py-6 px-4 bg-[linear-gradient(180deg,#d8ecfb_0%,#c6e2f6_100%)] pixel-btn-corner">
+      <h2 className="text-[34px] leading-none font-semibold tracking-[0.08em] text-[#1f4e7e] text-center animate-pulse" style={{ textShadow: '2px 2px 0 #f7fcff' }}>
+        GAME OVER
+      </h2>
+      <p className="mt-3 text-center text-[#1f4e7e] text-sm">
+        SCORE <span className="font-semibold text-base">{score.toLocaleString()}</span>
+      </p>
     </div>
-    <h2 className="text-4xl font-black text-red-600 mb-2 stroke-black" style={{ textShadow: '2px 2px 0 #000' }}>GAME OVER</h2>
-    
-    <RankingView rankings={rankings} />
-    
-    <ActionButton onClick={onRestart} colorClass="glossy-green">RETRY</ActionButton>
+
+    <ActionButton onClick={onRestart} colorClass="glossy-blue">RETRY</ActionButton>
   </ModalOverlay>
 );
 
 export const LevelCompleteModal = ({ score, level, onNext, rankings }: { score: number; level: number; onNext: () => void; rankings: RankingEntry[] }) => (
-  <ModalOverlay>
-    <div className="w-20 h-20 mx-auto mb-2">
-       <PartyIcon />
+  <ModalOverlay animated>
+    <PixelConfettiBurst />
+    <div className="w-full mb-4 py-6 px-4 bg-[linear-gradient(180deg,#d8ecfb_0%,#c6e2f6_100%)] pixel-btn-corner relative z-10">
+      <h2 className="text-[30px] leading-none font-semibold tracking-[0.08em] text-[#1f4e7e] text-center" style={{ textShadow: '2px 2px 0 #f7fcff' }}>
+        LEVEL {level} CLEAR
+      </h2>
+      <p className="mt-3 text-center text-[#1f4e7e] text-sm">
+        SCORE <span className="font-semibold text-base">{score.toLocaleString()}</span>
+      </p>
     </div>
-    <h2 className="text-4xl font-black text-blue-600 mb-2" style={{ textShadow: '2px 2px 0 #fff' }}>LEVEL {level} CLEAR!</h2>
 
-    <RankingView rankings={rankings} />
+    <div className="relative z-10 w-full">
+      <RankingView rankings={rankings} />
+    </div>
     
-    <ActionButton onClick={onNext} colorClass="glossy-blue">
+    <div className="relative z-10 w-full">
+      <ActionButton onClick={onNext} colorClass="glossy-blue">
       {level >= 5 ? 'ENDING' : 'NEXT LEVEL'}
-    </ActionButton>
+      </ActionButton>
+    </div>
   </ModalOverlay>
 );
 
 export const GameCompleteModal = ({ score, onRestart, rankings }: { score: number; onRestart: () => void; rankings: RankingEntry[] }) => (
-  <ModalOverlay>
-    <div className="w-24 h-24 mx-auto mb-4">
-      <TrophyIcon />
+  <ModalOverlay animated containerClass="pixel-sheet-corner bg-[linear-gradient(180deg,#ffeab0_0%,#ffd57f_58%,#f3b95d_100%)] p-4 border border-[#92521a] shadow-[3px_3px_0_#b06d2d] max-w-sm w-[90%] text-center relative flex flex-col items-center max-h-[90vh]">
+    <PixelConfettiBurst />
+    <div className="w-full mb-4 py-6 px-4 bg-[linear-gradient(180deg,#fff4cb_0%,#ffe296_100%)] pixel-btn-corner relative z-10">
+      <h2 className="text-[30px] leading-none font-semibold tracking-[0.08em] text-[#7a3e12] text-center" style={{ textShadow: '2px 2px 0 #fff9e3' }}>
+        ENDING
+      </h2>
+      <p className="mt-2 text-sm text-[#8a4a17] text-center">ALL CLEAR</p>
+      <p className="mt-3 text-center text-[#7a3e12] text-sm">
+        SCORE <span className="font-semibold text-base">{score.toLocaleString()}</span>
+      </p>
     </div>
-    <h2 className="text-4xl font-black text-yellow-500 mb-2" style={{ textShadow: '3px 3px 0 #000' }}>YOU WIN!</h2>
+
+    <div className="relative z-10 w-full">
+      <RankingView rankings={rankings} />
+    </div>
     
-    <RankingView rankings={rankings} />
-    
-    <ActionButton onClick={onRestart} colorClass="glossy-pink">RESTART GAME</ActionButton>
+    <div className="relative z-10 w-full">
+      <ActionButton onClick={onRestart} colorClass="glossy-pink">PLAY AGAIN</ActionButton>
+    </div>
   </ModalOverlay>
 );
 
 export const HelpModal = ({ onClose }: { onClose: () => void }) => (
   <ModalOverlay>
-    <div className="w-20 h-20 mx-auto mb-2">
-      <HintIcon /> 
+    <div className="w-full mb-4 py-6 px-4 bg-[linear-gradient(180deg,#d8ecfb_0%,#c6e2f6_100%)] pixel-btn-corner relative z-10">
+      <h2 className="text-[30px] leading-none font-semibold tracking-[0.08em] text-[#1f4e7e] text-center" style={{ textShadow: '2px 2px 0 #f7fcff' }}>
+        HOW TO PLAY
+      </h2>
     </div>
-    <h2 className="text-3xl font-black text-blue-900 mb-4 border-b-4 border-blue-900 pb-2 w-full">게임 방법</h2>
-    
-    <div className="w-full text-left bg-white p-4 border-2 border-blue-900 mb-4 shadow-inner">
-        <ul className="list-decimal pl-5 space-y-3 text-lg font-bold text-slate-700 break-keep">
+
+    <div className="w-full text-left bg-[#f3fbff] p-4 mb-4 pixel-btn-corner relative z-10">
+        <ul className="list-decimal pl-5 space-y-2 text-sm font-normal text-slate-700 break-keep">
             <li>
-                <span className="text-blue-600">짝 맞추기:</span> 똑같은 모양의 패 2개를 선택해서 없애세요.
+                <span className="text-[#d07f2f]">짝 맞추기:</span> 똑같은 모양의 패 2개를 선택해서 없애세요.
             </li>
             <li>
-                <span className="text-blue-600">규칙:</span> 연결하는 선은 <span className="text-red-500">2번까지만</span> 꺾일 수 있어요.
+                <span className="text-[#d07f2f]">규칙:</span> 연결하는 선은 <span className="text-red-500">2번까지만</span> 꺾일 수 있어요.
             </li>
             <li>
-                <span className="text-blue-600">보너스:</span> 매칭할 때마다 시간이 <span className="text-green-600">2초</span> 늘어납니다!
+                <span className="text-[#d07f2f]">보너스:</span> 매칭할 때마다 시간이 <span className="text-green-600">2초</span> 늘어납니다!
             </li>
             <li>
-                <span className="text-blue-600">아이템:</span> 힌트와 섞기는 광고를 보고 사용할 수 있어요.
+                <span className="text-[#d07f2f]">아이템:</span> 힌트와 섞기는 광고를 보고 사용할 수 있어요.
             </li>
         </ul>
     </div>
 
-    <ActionButton onClick={onClose} colorClass="glossy-blue">GAME START</ActionButton>
+    <div className="relative z-10 w-full">
+      <ActionButton onClick={onClose} colorClass="glossy-blue">GAME START</ActionButton>
+    </div>
   </ModalOverlay>
 );
 
 export const AdConfirmModal = ({ type, onConfirm, onCancel }: { type: 'hint' | 'shuffle', onConfirm: () => void, onCancel: () => void }) => (
   <ModalOverlay>
-    <div className="w-16 h-16 mx-auto mb-4 p-2 bg-blue-100 rounded-full border-4 border-blue-900 flex items-center justify-center">
-      <div className="w-10 h-10 text-blue-600"><VideoIcon /></div>
+    <div className="w-11 h-11 mb-3 text-[#1f2a55]">
+      {type === 'hint' ? <HintIcon /> : <ShuffleIcon />}
     </div>
-    <h2 className="text-2xl font-black text-blue-900 mb-4 border-b-4 border-blue-900 pb-2 w-full">
-        {type === 'hint' ? '힌트가 필요하신가요?' : '타일을 섞을까요?'}
-    </h2>
-    
-    <div className="text-lg font-bold text-slate-700 mb-6 break-keep">
-       광고를 시청하면<br/>
-       <span className="text-blue-600">{type === 'hint' ? '정답 하나를 알려드려요!' : '타일을 재배치해드려요!'}</span>
+
+    <div className="w-full text-center mb-5">
+      <h2 className="text-base font-medium text-[#1f4e7e] leading-tight mb-1">
+        {type === 'hint' ? '힌트를 받을까요?' : '타일을 섞을까요?'}
+      </h2>
+      <p className="text-sm font-normal text-[#4f6781] leading-snug break-keep">
+        {type === 'hint'
+          ? '광고를 시청하면 정답 하나를 바로 보여드려요.'
+          : '광고를 시청하면 현재 타일을 랜덤으로 재배치해드려요.'}
+      </p>
     </div>
 
     <div className="flex gap-3 w-full">
-        <button onClick={onCancel} className="flex-1 py-3 font-black text-slate-500 border-4 border-slate-300 bg-white hover:bg-slate-50 active:translate-y-1 rounded-lg">
-            취소
-        </button>
-        <button onClick={onConfirm} className="flex-1 py-3 font-black text-white border-4 border-blue-800 bg-blue-500 hover:bg-blue-400 shadow-[2px_2px_0_rgba(0,0,0,0.2)] active:translate-y-1 active:shadow-none rounded-lg flex items-center justify-center gap-2">
-            <span>네, 볼게요!</span>
-        </button>
+      <button
+        onClick={onCancel}
+        className={`flex-1 ${MODAL_BTN_BASE} text-[#365c7c] bg-[linear-gradient(180deg,#f8fcff_0%,#e0f0fa_100%)]`}
+      >
+        취소
+      </button>
+      <button
+        onClick={onConfirm}
+        className={`flex-1 ${MODAL_BTN_BASE} text-[#365c7c] bg-[linear-gradient(180deg,#f8fcff_0%,#dceefa_100%)] flex items-center justify-center`}
+      >
+        네, 볼게요!
+      </button>
     </div>
   </ModalOverlay>
 );

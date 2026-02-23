@@ -1,18 +1,14 @@
 
 import { createClient } from '@supabase/supabase-js';
+import { appStorage } from './storage';
+import { RankingEntry } from '../types';
+import { UserDataService } from '../services/contracts';
 
 // --- Types ---
 export interface UserRecord {
   id: string;
   high_score: number;
   games_played: number;
-}
-
-export interface RankingEntry {
-  rank: number;
-  name: string;
-  score: number;
-  isUser: boolean;
 }
 
 // --- Supabase Config ---
@@ -45,12 +41,12 @@ const generateUUID = () => {
 };
 
 const getDeviceId = (): string => {
-  let id = localStorage.getItem('shisen_device_id');
+  let id = appStorage.getItem('shisen_device_id');
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   
   if (!id || !uuidRegex.test(id)) {
     id = generateUUID();
-    localStorage.setItem('shisen_device_id', id);
+    appStorage.setItem('shisen_device_id', id);
   }
   return id;
 };
@@ -64,7 +60,7 @@ const MOCK_RANKERS = [
   { name: 'SHIBA', score: 8000 },
 ];
 
-class GameDB {
+class GameDB implements UserDataService {
   private client;
   private userId: string;
 
@@ -96,8 +92,14 @@ class GameDB {
 
   // --- Local Storage Helpers ---
   private getLocalData() {
-    const data = localStorage.getItem(LOCAL_DB_KEY);
-    if (data) return JSON.parse(data);
+    const data = appStorage.getItem(LOCAL_DB_KEY);
+    if (data) {
+      try {
+        return JSON.parse(data);
+      } catch {
+        // Continue with defaults if storage data is corrupted.
+      }
+    }
     return {
       high_score: 0,
       games_played: 0,
@@ -106,7 +108,7 @@ class GameDB {
   }
 
   private saveLocalData(data: any) {
-    localStorage.setItem(LOCAL_DB_KEY, JSON.stringify(data));
+    appStorage.setItem(LOCAL_DB_KEY, JSON.stringify(data));
   }
 
   // --- Public API ---
@@ -316,3 +318,4 @@ class GameDB {
 }
 
 export const db = new GameDB();
+export const userDataService: UserDataService = db;
