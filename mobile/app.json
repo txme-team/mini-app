@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "Dangdangpang",
+    "slug": "dangdangpang-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#d4e8f7"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.txme.dangdangpang"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#d4e8f7"
+      },
+      "package": "com.txme.dangdangpang",
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "webUrl": "https://dangdangpang.vercel.app"
+    }
+  }
+}
