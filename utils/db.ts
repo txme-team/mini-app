@@ -26,8 +26,24 @@ const RAW_SUPABASE_KEY =
   (typeof process !== 'undefined' && process.env && process.env.REACT_APP_SUPABASE_ANON_KEY) || 
   '';
 
+const RAW_SUPABASE_SCHEMA =
+  // @ts-ignore
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_SCHEMA) ||
+  // @ts-ignore
+  (typeof process !== 'undefined' && process.env && process.env.REACT_APP_SUPABASE_SCHEMA) ||
+  'public';
+
+const RAW_SUPABASE_TABLE =
+  // @ts-ignore
+  (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_SUPABASE_TABLE) ||
+  // @ts-ignore
+  (typeof process !== 'undefined' && process.env && process.env.REACT_APP_SUPABASE_TABLE) ||
+  'profiles';
+
 const SUPABASE_URL = RAW_SUPABASE_URL.replace(/['"]/g, '').trim();
 const SUPABASE_KEY = RAW_SUPABASE_KEY.replace(/['"]/g, '').trim();
+const SUPABASE_SCHEMA = RAW_SUPABASE_SCHEMA.replace(/['"]/g, '').trim() || 'public';
+const SUPABASE_TABLE = RAW_SUPABASE_TABLE.replace(/['"]/g, '').trim() || 'profiles';
 
 // --- Local Storage Key ---
 const LOCAL_DB_KEY = 'shisen_sho_local_data_v3';
@@ -63,17 +79,21 @@ const MOCK_RANKERS = [
 class GameDB implements UserDataService {
   private client;
   private userId: string;
+  private schema: string;
+  private table: string;
 
   constructor() {
     this.userId = getDeviceId();
+    this.schema = SUPABASE_SCHEMA;
+    this.table = SUPABASE_TABLE;
     
     const hasUrl = !!SUPABASE_URL && SUPABASE_URL.length > 0;
     const hasKey = !!SUPABASE_KEY && SUPABASE_KEY.length > 20;
 
     if (hasUrl && hasKey) {
-      console.log("Supabase Client Connecting to 'ddp' Schema..."); 
+      console.log(`Supabase Client Connecting to '${this.schema}.${this.table}'...`); 
       this.client = createClient(SUPABASE_URL, SUPABASE_KEY, {
-        db: { schema: 'ddp' },
+        db: { schema: this.schema },
         auth: {
             persistSession: false,
             autoRefreshToken: false,
@@ -129,7 +149,7 @@ class GameDB implements UserDataService {
     // 2. Try Supabase Sync
     try {
       const { data, error } = await this.client
-        .from('profiles')
+        .from(this.table)
         .select('id, username, high_score')
         .eq('id', this.userId)
         .maybeSingle();
@@ -152,7 +172,7 @@ class GameDB implements UserDataService {
       // If not found on server, try to create it (Upsert)
       // If this fails due to RLS, we catch it below and just return local
       const { error: upsertError } = await this.client
-        .from('profiles')
+        .from(this.table)
         .upsert({
             id: this.userId,
             high_score: local.high_score,
@@ -189,7 +209,7 @@ class GameDB implements UserDataService {
     if (this.client) {
       try {
         const { error } = await this.client
-          .from('profiles')
+          .from(this.table)
           .upsert({ 
             id: this.userId, 
             username: nickname, 
@@ -221,7 +241,7 @@ class GameDB implements UserDataService {
       try {
         // Fetch current server data to compare (Optimistic)
         const { data: existing } = await this.client
-          .from('profiles')
+          .from(this.table)
           .select('high_score, games_played')
           .eq('id', this.userId)
           .maybeSingle();
@@ -231,7 +251,7 @@ class GameDB implements UserDataService {
         const newHighScore = Math.max(oldScore, currentScore);
 
         const { error } = await this.client
-            .from('profiles')
+            .from(this.table)
             .upsert({
               id: this.userId,
               high_score: newHighScore,
@@ -261,7 +281,7 @@ class GameDB implements UserDataService {
 
     try {
       const { data: topPlayers, error } = await this.client
-        .from('profiles')
+        .from(this.table)
         .select('id, username, high_score')
         .order('high_score', { ascending: false })
         .limit(3);
@@ -280,7 +300,7 @@ class GameDB implements UserDataService {
       });
 
       const { count } = await this.client
-        .from('profiles')
+        .from(this.table)
         .select('*', { count: 'exact', head: true })
         .gt('high_score', currentScore);
       

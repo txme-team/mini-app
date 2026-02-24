@@ -17,5 +17,12 @@ This repository is ready to run with Vite + React.
    `VITE_ADMOB_ANDROID_REWARDED_ID=ca-app-pub-xxx/yyy`
    `VITE_ADMOB_IOS_REWARDED_ID=ca-app-pub-xxx/yyy`
    `VITE_ADMOB_TEST_MODE=true`
-3. Run the app:
+3. (Optional) Configure Supabase in `.env.local`:
+   `VITE_SUPABASE_URL=https://<project-ref>.supabase.co`
+   `VITE_SUPABASE_ANON_KEY=<anon-key>`
+   `VITE_SUPABASE_SCHEMA=public`
+   `VITE_SUPABASE_TABLE=profiles`
+4. (Optional) In Supabase SQL Editor, run:
+   `supabase/schema.sql`
+5. Run the app:
    `npm run dev`

@@ -150,7 +150,17 @@ const parseMessagePayload = (raw: unknown): any | null => {
       return null;
     }
   }
-  if (typeof raw === 'object') return raw;
+  if (typeof raw === 'object') {
+    const maybeWrapped = raw as { data?: unknown };
+    if (typeof maybeWrapped.data === 'string') {
+      try {
+        return JSON.parse(maybeWrapped.data);
+      } catch {
+        return null;
+      }
+    }
+    return raw;
+  }
   return null;
 };
 
@@ -165,6 +175,7 @@ const requestRewardFromReactNativeWebView = (onReward: () => void, onDismiss: ()
 
   const cleanup = () => {
     window.removeEventListener('message', onMessage as EventListener);
+    document.removeEventListener('message', onMessage as EventListener);
     clearTimeout(timeoutId);
   };
 
@@ -192,10 +203,11 @@ const requestRewardFromReactNativeWebView = (onReward: () => void, onDismiss: ()
   };
 
   window.addEventListener('message', onMessage as EventListener);
+  document.addEventListener('message', onMessage as EventListener);
 
   const timeoutId = window.setTimeout(() => {
     settleDismiss();
-  }, 45000);
+  }, 90000);
 
   try {
     window.ReactNativeWebView!.postMessage!(

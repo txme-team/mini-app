@@ -8,6 +8,7 @@ class WebSoundManager implements SoundService {
   private bgmOscillators: OscillatorNode[] = [];
   private bgmGain: GainNode | null = null;
   private isBgmPlaying: boolean = false;
+  private didUnlock: boolean = false;
 
   constructor() {
     // Intentionally empty.
@@ -20,7 +21,7 @@ class WebSoundManager implements SoundService {
       try {
         const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
         if (AudioContextClass) {
-          this.ctx = new AudioContextClass();
+          this.ctx = new AudioContextClass({ latencyHint: 'interactive' } as AudioContextOptions);
         }
       } catch (e) {
         console.error("Web Audio API not supported", e);
@@ -35,19 +36,22 @@ class WebSoundManager implements SoundService {
     if (this.ctx) {
         // 1. Resume context if suspended
         if (this.ctx.state === 'suspended') {
-            this.ctx.resume().catch(e => {});
+            this.ctx.resume().catch(() => {});
         }
 
         // 2. iOS Unlock Trick: Play a short silent buffer
         // This forces the audio hardware to wake up immediately within the interaction event.
-        try {
-            const buffer = this.ctx.createBuffer(1, 1, 22050);
-            const source = this.ctx.createBufferSource();
-            source.buffer = buffer;
-            source.connect(this.ctx.destination);
-            source.start(0);
-        } catch (e) {
-            // Ignore errors here
+        if (!this.didUnlock) {
+          try {
+              const buffer = this.ctx.createBuffer(1, 1, 22050);
+              const source = this.ctx.createBufferSource();
+              source.buffer = buffer;
+              source.connect(this.ctx.destination);
+              source.start(0);
+              this.didUnlock = true;
+          } catch {
+              // Ignore errors here
+          }
         }
     }
   }

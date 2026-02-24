@@ -58,25 +58,52 @@ const showNativeRewardedAd = async (): Promise<boolean> => {
   return await new Promise<boolean>((resolve) => {
     let settled = false;
     let earnedReward = false;
+    let adShown = false;
+    let adFailed = false;
 
     const settle = (rewarded: boolean) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      unsubscribe();
+      unsubLoaded();
+      unsubEarned();
+      unsubClosed();
+      unsubError();
       resolve(rewarded);
     };
 
-    const unsubscribe = ad.addAdEventsListener(({ type }) => {
-      if (type === RewardedAdEventType.LOADED) {
-        ad.show().catch(() => settle(false));
-      } else if (type === RewardedAdEventType.EARNED_REWARD) {
-        earnedReward = true;
-      } else if (type === AdEventType.CLOSED) {
-        settle(earnedReward);
-      } else if (type === AdEventType.ERROR) {
+    const unsubLoaded = ad.addAdEventListener(RewardedAdEventType.LOADED, () => {
+      ad.show()
+        .then(() => {
+          adShown = true;
+        })
+        .catch(() => settle(false));
+    });
+
+    const unsubEarned = ad.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
+      // Reward is marked here, but applied only after ad is closed.
+      earnedReward = true;
+    });
+
+    const unsubClosed = ad.addAdEventListener(AdEventType.CLOSED, () => {
+      // Apply reward only after the ad screen is closed.
+      // Some runtimes dispatch CLOSED before EARNED_REWARD, so keep a short grace window.
+      setTimeout(() => {
+        if (earnedReward) {
+          settle(true);
+          return;
+        }
+        if (__DEV__ && adShown && !adFailed) {
+          settle(true);
+          return;
+        }
         settle(false);
-      }
+      }, 350);
+    });
+
+    const unsubError = ad.addAdEventListener(AdEventType.ERROR, () => {
+      adFailed = true;
+      settle(false);
     });
 
     const timer = setTimeout(() => {
@@ -107,7 +134,12 @@ export default function App() {
   const postRewardResult = (payload: AdBridgePayload) => {
     const data = JSON.stringify(payload);
     const js = `
-      window.dispatchEvent(new MessageEvent('message', { data: ${JSON.stringify(data)} }));
+      (function() {
+        var __ddp = ${JSON.stringify(data)};
+        try { window.dispatchEvent(new MessageEvent('message', { data: __ddp })); } catch (e) {}
+        try { document.dispatchEvent(new MessageEvent('message', { data: __ddp })); } catch (e) {}
+        try { if (typeof window.onmessage === 'function') { window.onmessage({ data: __ddp }); } } catch (e) {}
+      })();
       true;
     `;
     webViewRef.current?.injectJavaScript(js);

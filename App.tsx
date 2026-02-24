@@ -95,19 +95,28 @@ const GameApp: React.FC = () => {
     const unlockAudio = () => {
       sound.init();
       // Remove after first interaction
+      window.removeEventListener('pointerdown', unlockAudio);
       window.removeEventListener('touchstart', unlockAudio);
+      window.removeEventListener('mousedown', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
       window.removeEventListener('click', unlockAudio);
     };
 
     // 'touchstart' is more reliable than 'click' on iOS for audio unlocking
+    window.addEventListener('pointerdown', unlockAudio, { passive: true });
     window.addEventListener('touchstart', unlockAudio);
+    window.addEventListener('mousedown', unlockAudio);
+    window.addEventListener('keydown', unlockAudio);
     window.addEventListener('click', unlockAudio);
 
     return () => {
+      window.removeEventListener('pointerdown', unlockAudio);
       window.removeEventListener('touchstart', unlockAudio);
+      window.removeEventListener('mousedown', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
       window.removeEventListener('click', unlockAudio);
     };
-  }, []);
+  }, [sound]);
 
   const startLevel = useCallback((level: number) => {
     const config: LevelConfig = LEVEL_CONFIGS[level];
