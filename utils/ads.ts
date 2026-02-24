@@ -20,6 +20,9 @@ declare global {
         AdMob?: AdMobPlugin;
       };
     };
+    ReactNativeWebView?: {
+      postMessage?: (data: string) => void;
+    };
   }
 }
 
@@ -42,10 +45,15 @@ const ENV_ADMOB_TEST_MODE = (
 ).trim().toLowerCase();
 
 let admobInitPromise: Promise<void> | null = null;
+let rnRewardRequestSeq = 0;
 
 const isLocalWeb = (): boolean => {
   if (typeof window === 'undefined') return false;
   return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+};
+
+const isReactNativeWebView = (): boolean => {
+  return typeof window !== 'undefined' && typeof window.ReactNativeWebView?.postMessage === 'function';
 };
 
 const getPlatform = (): string => {
@@ -114,6 +122,11 @@ const cleanupListeners = async (handles: Array<ListenerHandle | null>) => {
 };
 
 export const initAds = () => {
+  if (isReactNativeWebView()) {
+    console.log('[AdBridge] React Native WebView mode: native rewarded ads enabled.');
+    return;
+  }
+
   if (!isNativeApp()) {
     console.log('[AdMob] Web mode: native ads are disabled.');
     return;
@@ -128,6 +141,76 @@ export const initAds = () => {
     });
 };
 
+const parseMessagePayload = (raw: unknown): any | null => {
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof raw === 'object') return raw;
+  return null;
+};
+
+const requestRewardFromReactNativeWebView = (onReward: () => void, onDismiss: () => void) => {
+  if (!isReactNativeWebView()) {
+    onDismiss();
+    return;
+  }
+
+  const requestId = `rn-reward-${Date.now()}-${rnRewardRequestSeq++}`;
+  let settled = false;
+
+  const cleanup = () => {
+    window.removeEventListener('message', onMessage as EventListener);
+    clearTimeout(timeoutId);
+  };
+
+  const settleReward = () => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    onReward();
+  };
+
+  const settleDismiss = () => {
+    if (settled) return;
+    settled = true;
+    cleanup();
+    onDismiss();
+  };
+
+  const onMessage = (event: MessageEvent) => {
+    const payload = parseMessagePayload(event.data);
+    if (!payload || payload.source !== 'dangdangpang') return;
+    if (payload.type !== 'REWARDED_AD_RESULT' || payload.requestId !== requestId) return;
+
+    if (payload.rewarded) settleReward();
+    else settleDismiss();
+  };
+
+  window.addEventListener('message', onMessage as EventListener);
+
+  const timeoutId = window.setTimeout(() => {
+    settleDismiss();
+  }, 45000);
+
+  try {
+    window.ReactNativeWebView!.postMessage!(
+      JSON.stringify({
+        source: 'dangdangpang',
+        type: 'SHOW_REWARDED_AD',
+        requestId,
+      })
+    );
+  } catch (error) {
+    console.warn('[AdBridge] Failed to request native rewarded ad:', error);
+    settleDismiss();
+  }
+};
+
 /**
  * Shows rewarded ad.
  * - Native app: Google AdMob rewarded
@@ -136,6 +219,11 @@ export const initAds = () => {
  */
 export const showRewardAd = (onReward: () => void, onDismiss: () => void) => {
   const run = async () => {
+    if (isReactNativeWebView()) {
+      requestRewardFromReactNativeWebView(onReward, onDismiss);
+      return;
+    }
+
     if (!isNativeApp()) {
       if (!isLocalWeb()) {
         onDismiss();
@@ -213,4 +301,3 @@ export const showRewardAd = (onReward: () => void, onDismiss: () => void) => {
 
   void run();
 };
-

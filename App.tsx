@@ -517,34 +517,34 @@ const GameApp: React.FC = () => {
         </div>
 
         {/* Bottom Controls */}
-        <div className="mt-1 shrink-0 flex gap-2 h-[64px] ui-header p-1.5">
+        <div className="mt-1 shrink-0 flex gap-1 sm:gap-2 h-[58px] sm:h-[64px] ui-header p-1">
            <button
              onClick={toggleMute}
-             className="retro-icon-btn pixel-btn-corner !w-[64px] !h-full shrink-0"
+             className="retro-icon-btn pixel-btn-corner !w-[44px] sm:!w-[64px] !h-full shrink-0"
              aria-label={isMuted ? '소리 켜기' : '소리 끄기'}
              title={isMuted ? 'SOUND ON' : 'SOUND OFF'}
            >
-             <div className="w-8 h-8">{isMuted ? <SoundOffIcon /> : <SoundOnIcon />}</div>
+             <div className="w-[22px] h-[22px] sm:w-8 sm:h-8">{isMuted ? <SoundOffIcon /> : <SoundOnIcon />}</div>
            </button>
 
             <button
              onClick={togglePause}
-             className="retro-icon-btn pixel-btn-corner !w-[64px] !h-full shrink-0"
+             className="retro-icon-btn pixel-btn-corner !w-[44px] sm:!w-[64px] !h-full shrink-0"
              aria-label={isPaused ? '게임 재개' : '게임 일시정지'}
              title={isPaused ? 'RESUME' : 'PAUSE'}
             >
-             <div className="w-8 h-8">{isPaused ? <PlayIcon /> : <PauseIcon />}</div>
+             <div className="w-[22px] h-[22px] sm:w-8 sm:h-8">{isPaused ? <PlayIcon /> : <PauseIcon />}</div>
             </button>
 
            {/* Hint Button */}
            <button 
              onClick={handleHintClick}
-             className="flex-1 ui-action-hint pixel-btn-corner flex items-center justify-center gap-3 px-3 py-2 text-[#5b360f] active:translate-y-1 active:shadow-none transition-colors"
+             className="min-w-0 flex-1 ui-action-hint pixel-btn-corner flex items-center justify-center gap-1 sm:gap-3 px-1.5 sm:px-3 py-2 text-[#5b360f] active:translate-y-1 active:shadow-none transition-colors"
            >
-              <div className="w-10 h-10"><HintIcon /></div>
-              <div className="flex items-center gap-2 leading-none">
-                 <span className="font-bold text-sm">HINT</span>
-                 <div className="flex items-center gap-1 text-[10px] bg-black/20 px-2 py-0.5 pixel-btn-corner-sm border border-white/20">
+              <div className="hidden sm:block w-6 h-6 sm:w-10 sm:h-10 shrink-0"><HintIcon /></div>
+              <div className="flex items-center gap-1 leading-none min-w-0">
+                 <span className="font-bold text-[11px] sm:text-sm whitespace-nowrap">HINT</span>
+                 <div className="flex items-center gap-1 text-[9px] sm:text-[10px] bg-black/20 px-1.5 sm:px-2 py-0.5 pixel-btn-corner-sm border border-white/20 shrink-0">
                     <div className="w-3 h-3"><VideoIcon /></div>
                     <span>AD</span>
                  </div>
@@ -554,12 +554,12 @@ const GameApp: React.FC = () => {
            {/* Shuffle Button */}
            <button 
              onClick={handleShuffleClick}
-             className="flex-1 ui-action-shuffle pixel-btn-corner flex items-center justify-center gap-3 px-3 py-2 text-[#5b360f] active:translate-y-1 active:shadow-none transition-colors"
+             className="min-w-0 flex-1 ui-action-shuffle pixel-btn-corner flex items-center justify-center gap-1 sm:gap-3 px-1.5 sm:px-3 py-2 text-[#5b360f] active:translate-y-1 active:shadow-none transition-colors"
            >
-              <div className="w-10 h-10"><ShuffleIcon /></div>
-              <div className="flex items-center gap-2 leading-none">
-                 <span className="font-bold text-sm">SHUFFLE</span>
-                 <div className="flex items-center gap-1 text-[10px] bg-black/20 px-2 py-0.5 pixel-btn-corner-sm border border-white/20">
+              <div className="hidden sm:block w-6 h-6 sm:w-10 sm:h-10 shrink-0"><ShuffleIcon /></div>
+              <div className="flex items-center gap-1 leading-none min-w-0">
+                 <span className="font-bold text-[11px] sm:text-sm whitespace-nowrap">SHUFFLE</span>
+                 <div className="flex items-center gap-1 text-[9px] sm:text-[10px] bg-black/20 px-1.5 sm:px-2 py-0.5 pixel-btn-corner-sm border border-white/20 shrink-0">
                     <div className="w-3 h-3"><VideoIcon /></div>
                     <span>AD</span>
                  </div>
