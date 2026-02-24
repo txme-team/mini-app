@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { WebView } from 'react-native-webview';
+import AdBanner from './components/AdBanner';
 
 const DEFAULT_WEB_URL = 'https://dangdangpang.vercel.app';
 
@@ -59,6 +60,8 @@ export default function App() {
           </Pressable>
         </View>
       )}
+
+      <AdBanner />
     </SafeAreaView>
   );
 }
