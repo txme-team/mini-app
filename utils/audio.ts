@@ -14,6 +14,7 @@ type AudioBackend = 'web-audio' | 'html5-audio' | 'rn-bridge';
 
 const MUTE_STORAGE_KEY = 'dangdangpang:isMuted';
 const HTML_POOL_SIZE = 8;
+const IOS_BACKEND_STORAGE_KEY = 'dangdangpang:ios_sfx_backend';
 const HTML_AUDIO_VERSION = '20260226-1';
 const HTML_AUDIO_SRC: Record<SoundEvent, string> = {
   select: `/sfx/select.mp3?v=${HTML_AUDIO_VERSION}`,
@@ -51,6 +52,11 @@ class WebSoundManager implements SoundService {
   private htmlPoolReady = false;
   private htmlPoolWarmedUp = false;
 
+  private iosBufferCtx: AudioContext | null = null;
+  private iosBufferCache: Partial<Record<SoundEvent, AudioBuffer>> = {};
+  private iosBufferReady = false;
+  private iosBufferLoading = false;
+
   constructor() {
     this.storedMutedValue = this.readStoredMuted();
     this.isMuted = this.storedMutedValue === 'true';
@@ -72,6 +78,7 @@ class WebSoundManager implements SoundService {
 
     if (this.backend === 'html5-audio') {
       this.ensureHtmlAudioPools();
+      this.prepareIOSBufferBackend();
     }
     if (this.backend === 'web-audio') {
       this.attachLifecycleResumeHandlers();
@@ -84,6 +91,7 @@ class WebSoundManager implements SoundService {
     if (this.backend === 'html5-audio') {
       this.ensureHtmlAudioPools();
       this.warmupHtmlAudioPools();
+      this.prepareIOSBufferBackend();
       this.updateDebug({
         lastResume: { ok: true, at: Date.now(), reason: 'html5-init' },
       });
@@ -377,6 +385,11 @@ class WebSoundManager implements SoundService {
     }
 
     if (this.backend === 'html5-audio') {
+      const requestAt = performance.now();
+      if (this.shouldUseIOSBufferBackend()) {
+        const played = this.playIOSBufferSound(event, requestAt);
+        if (played) return;
+      }
       this.playHtmlSound(event);
       return;
     }
@@ -419,6 +432,11 @@ class WebSoundManager implements SoundService {
     audio.muted = this.isMuted && !this.forceMasterGain;
 
     try {
+      // iOS Safari can leave elements in a pseudo-playing silent state.
+      // Always hard-reset before replaying.
+      if (!audio.paused && !audio.ended) {
+        audio.pause();
+      }
       try {
         if (audio.readyState > 0) {
           audio.currentTime = 0;
@@ -574,6 +592,86 @@ class WebSoundManager implements SoundService {
         }
       });
     });
+  }
+
+  private shouldUseIOSBufferBackend() {
+    if (typeof window === 'undefined') return false;
+    const ua = window.navigator.userAgent || '';
+    const isiOS = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+    if (!isiOS) return false;
+    try {
+      const pref = window.localStorage.getItem(IOS_BACKEND_STORAGE_KEY);
+      return pref === 'buffer' && this.iosBufferReady;
+    } catch {
+      return false;
+    }
+  }
+
+  private prepareIOSBufferBackend() {
+    if (this.iosBufferReady || this.iosBufferLoading || typeof window === 'undefined') return;
+    const ua = window.navigator.userAgent || '';
+    const isiOS = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+    if (!isiOS) return;
+
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioContextClass) return;
+
+    this.iosBufferLoading = true;
+    this.iosBufferCtx = this.iosBufferCtx ?? new AudioContextClass({ latencyHint: 'interactive' } as AudioContextOptions);
+
+    const tasks = (Object.keys(HTML_AUDIO_SRC) as SoundEvent[]).map(async (sound) => {
+      const res = await fetch(HTML_AUDIO_SRC[sound], { cache: 'force-cache' });
+      const ab = await res.arrayBuffer();
+      const decoded = await this.iosBufferCtx!.decodeAudioData(ab.slice(0));
+      this.iosBufferCache[sound] = decoded;
+    });
+
+    void Promise.all(tasks)
+      .then(() => {
+        this.iosBufferReady = true;
+        console.log('[SFX-BUFFER] iOS buffer backend prepared');
+      })
+      .catch((error) => {
+        console.warn('[SFX-BUFFER] prepare failed, fallback html5', error);
+        this.iosBufferReady = false;
+      })
+      .finally(() => {
+        this.iosBufferLoading = false;
+      });
+  }
+
+  private playIOSBufferSound(event: SoundEvent, requestAt: number) {
+    if (!this.iosBufferReady || !this.iosBufferCtx) return false;
+    const buffer = this.iosBufferCache[event];
+    if (!buffer) return false;
+    try {
+      if (this.iosBufferCtx.state === 'suspended') {
+        void this.iosBufferCtx.resume();
+      }
+      const src = this.iosBufferCtx.createBufferSource();
+      const gain = this.iosBufferCtx.createGain();
+      gain.gain.value = this.getEffectiveVolume();
+      src.buffer = buffer;
+      src.connect(gain);
+      gain.connect(this.iosBufferCtx.destination);
+      src.start(0);
+      const latency = performance.now() - requestAt;
+      console.log(`[SFX-LATENCY] ios-buffer ${event} start in ${latency.toFixed(1)}ms`);
+      this.updateDebug({
+        lastPlay: {
+          ok: true,
+          at: Date.now(),
+          backend: 'web-audio',
+          sound: event,
+          message: 'ios-buffer source start',
+        },
+      });
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[SFX-BUFFER] play failed ${event}, fallback html5: ${message}`);
+      return false;
+    }
   }
 
   private syncHtmlAudioVolumes() {
