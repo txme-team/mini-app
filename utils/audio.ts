@@ -40,6 +40,16 @@ class WebSoundManager implements SoundService {
   private rmsTimer: number | null = null;
 
   private htmlAudioPools: Partial<Record<SoundEvent, HTMLAudioElement[]>> = {};
+  private htmlBusyUntil = new WeakMap<HTMLAudioElement, number>();
+  private readonly htmlSoundDurationMs: Record<SoundEvent, number> = {
+    select: 120,
+    match: 320,
+    store: 260,
+    error: 260,
+    gameover: 900,
+    levelcomplete: 900,
+    ending: 1400,
+  };
   private htmlPoolCursor: Record<SoundEvent, number> = {
     select: 0,
     match: 0,
@@ -428,15 +438,27 @@ class WebSoundManager implements SoundService {
 
     const audio = this.pickHtmlAudioInstance(event, pool);
     const index = pool.indexOf(audio);
+    const holdMs = this.htmlSoundDurationMs[event] ?? 300;
+    this.htmlBusyUntil.set(audio, requestAt + holdMs);
     audio.volume = this.getEffectiveVolume();
     audio.muted = this.isMuted && !this.forceMasterGain;
     try {
-      audio.currentTime = 0;
+      try {
+        if (audio.readyState > 0) {
+          audio.currentTime = 0;
+        }
+      } catch {
+        // iOS can throw if currentTime is set before metadata is ready.
+      }
       const onPlaying = () => {
         const latency = performance.now() - requestAt;
         console.log(`[SFX-LATENCY] html5 ${event} playing in ${latency.toFixed(1)}ms (pool#${index})`);
       };
+      const onEnded = () => {
+        this.htmlBusyUntil.set(audio, performance.now());
+      };
       audio.addEventListener('playing', onPlaying, { once: true });
+      audio.addEventListener('ended', onEnded, { once: true });
       const promise = audio.play();
       if (promise && typeof promise.then === 'function') {
         void promise
@@ -454,6 +476,7 @@ class WebSoundManager implements SoundService {
           })
           .catch((error) => {
             const message = error instanceof Error ? error.message : String(error);
+            this.htmlBusyUntil.set(audio, performance.now());
             console.warn(`[SFX-PLAY] html5 reject ${event} pool#${index}: ${message}`);
             this.updateDebug({
               lastPlay: {
@@ -479,6 +502,7 @@ class WebSoundManager implements SoundService {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      this.htmlBusyUntil.set(audio, performance.now());
       console.warn(`[SFX-PLAY] html5 exception ${event} pool#${index}: ${message}`);
       this.updateDebug({
         lastPlay: {
@@ -502,6 +526,7 @@ class WebSoundManager implements SoundService {
         audio.playsInline = true;
         audio.volume = this.getEffectiveVolume();
         audio.muted = this.isMuted && !this.forceMasterGain;
+        audio.load();
         return audio;
       });
     });
@@ -515,45 +540,49 @@ class WebSoundManager implements SoundService {
   }
 
   private pickHtmlAudioInstance(sound: SoundEvent, pool: HTMLAudioElement[]) {
-    const free = pool.find((audio) => audio.paused || audio.ended);
+    const now = performance.now();
+    const free = pool.find((audio) => (audio.paused || audio.ended) && (this.htmlBusyUntil.get(audio) ?? 0) <= now);
     if (free) return free;
 
-    const index = this.htmlPoolCursor[sound] % pool.length;
-    this.htmlPoolCursor[sound] = (index + 1) % pool.length;
-    const picked = pool[index];
-    picked.currentTime = 0;
+    let picked = pool[0];
+    let minBusyUntil = this.htmlBusyUntil.get(picked) ?? 0;
+    for (const candidate of pool) {
+      const until = this.htmlBusyUntil.get(candidate) ?? 0;
+      if (until < minBusyUntil) {
+        picked = candidate;
+        minBusyUntil = until;
+      }
+    }
+
+    const index = pool.indexOf(picked);
+    this.htmlPoolCursor[sound] = ((index >= 0 ? index : 0) + 1) % pool.length;
     return picked;
   }
 
   private warmupHtmlAudioPools() {
     if (this.backend !== 'html5-audio' || this.htmlPoolWarmedUp) return;
     this.htmlPoolWarmedUp = true;
-    (Object.keys(this.htmlAudioPools) as SoundEvent[]).forEach((sound) => {
-      const pool = this.htmlAudioPools[sound];
-      const first = pool?.[0];
-      if (!first) return;
-      const prevMuted = first.muted;
-      const prevVolume = first.volume;
-      first.muted = true;
-      first.volume = 0;
+    (Object.keys(HTML_AUDIO_SRC) as SoundEvent[]).forEach((sound) => {
+      const primer = new Audio(HTML_AUDIO_SRC[sound]);
+      primer.preload = 'auto';
+      primer.playsInline = true;
+      primer.muted = true;
+      primer.volume = 0;
       try {
-        const p = first.play();
+        const p = primer.play();
         if (p && typeof p.then === 'function') {
           void p
             .then(() => {
-              first.pause();
-              first.currentTime = 0;
-              first.muted = prevMuted;
-              first.volume = prevVolume;
+              primer.pause();
+              primer.currentTime = 0;
+              primer.src = '';
             })
             .catch(() => {
-              first.muted = prevMuted;
-              first.volume = prevVolume;
+              primer.src = '';
             });
         }
       } catch {
-        first.muted = prevMuted;
-        first.volume = prevVolume;
+        primer.src = '';
       }
     });
   }

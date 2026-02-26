@@ -69,6 +69,7 @@ const GameApp: React.FC = () => {
   const [floatingTexts, setFloatingTexts] = useState<FloatingTextData[]>([]);
   const [isScoreAnimating, setIsScoreAnimating] = useState(false);
   const endingSfxPlayedRef = useRef(false);
+  const gameOverSfxPlayedRef = useRef(false);
 
   // Ranking State for Modals
   const [rankings, setRankings] = useState<RankingEntry[]>([]);
@@ -191,6 +192,7 @@ const GameApp: React.FC = () => {
     setRankings([]); 
     setIsPaused(false);
     endingSfxPlayedRef.current = false;
+    gameOverSfxPlayedRef.current = false;
   }, []);
 
   const restartGame = async () => {
@@ -205,6 +207,7 @@ const GameApp: React.FC = () => {
     }));
     setIsPaused(false);
     endingSfxPlayedRef.current = false;
+    gameOverSfxPlayedRef.current = false;
     startLevel(1);
   };
 
@@ -236,7 +239,8 @@ const GameApp: React.FC = () => {
 
   // Game Over
   useEffect(() => {
-    if (gameState.isGameOver && gameState.timeLeft === 0) {
+    if (gameState.isGameOver && !gameOverSfxPlayedRef.current) {
+        gameOverSfxPlayedRef.current = true;
         sound.playGameOver();
         const finishGame = async () => {
             await userData.saveScore(gameState.score);
@@ -245,7 +249,7 @@ const GameApp: React.FC = () => {
         };
         finishGame();
     }
-  }, [gameState.isGameOver, gameState.timeLeft, gameState.score]);
+  }, [gameState.isGameOver, gameState.score, sound, userData]);
 
 
   // --- Logic ---
