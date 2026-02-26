@@ -96,7 +96,10 @@ const GameApp: React.FC = () => {
       sound.init();
 
       const debug = sound.getDebugState?.();
-      if (!debug?.unlocked) return;
+      const shouldDetach =
+        (debug?.mode && debug.mode !== 'web-audio') ||
+        !!debug?.unlocked;
+      if (!shouldDetach) return;
       window.removeEventListener('pointerdown', tryUnlock);
       window.removeEventListener('touchstart', tryUnlock);
       window.removeEventListener('mousedown', tryUnlock);

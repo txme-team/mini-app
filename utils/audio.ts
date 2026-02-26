@@ -13,7 +13,7 @@ type SoundEvent = 'select' | 'match' | 'store' | 'error' | 'gameover' | 'levelco
 type AudioBackend = 'web-audio' | 'html5-audio' | 'rn-bridge';
 
 const MUTE_STORAGE_KEY = 'dangdangpang:isMuted';
-const HTML_POOL_SIZE = 5;
+const HTML_POOL_SIZE = 8;
 const HTML_AUDIO_VERSION = '20260226-1';
 const HTML_AUDIO_SRC: Record<SoundEvent, string> = {
   select: `/sfx/select.mp3?v=${HTML_AUDIO_VERSION}`,
@@ -84,7 +84,9 @@ class WebSoundManager implements SoundService {
     if (this.backend === 'html5-audio') {
       this.ensureHtmlAudioPools();
       this.warmupHtmlAudioPools();
+      this.didUnlock = true;
       this.updateDebug({
+        unlocked: true,
         lastResume: { ok: true, at: Date.now(), reason: 'html5-init' },
       });
       return;
@@ -395,7 +397,7 @@ class WebSoundManager implements SoundService {
     });
   }
 
-  private playHtmlSound(event: SoundEvent) {
+  private playHtmlSound(event: SoundEvent, allowRetry = true) {
     this.ensureHtmlAudioPools();
     const pool = this.htmlAudioPools[event];
     if (!pool || pool.length === 0) {
@@ -417,7 +419,14 @@ class WebSoundManager implements SoundService {
     audio.volume = this.getEffectiveVolume();
     audio.muted = this.isMuted && !this.forceMasterGain;
     try {
-      if (audio.paused || audio.ended) {
+      if (audio.readyState < 2) {
+        try {
+          audio.load();
+        } catch {
+          // no-op
+        }
+      }
+      if (audio.readyState > 0 && (audio.paused || audio.ended)) {
         audio.currentTime = 0;
       }
       const promise = audio.play();
@@ -447,6 +456,9 @@ class WebSoundManager implements SoundService {
               },
               lastError: `html5 play rejected: ${message}`,
             });
+            if (allowRetry) {
+              window.setTimeout(() => this.playHtmlSound(event, false), 60);
+            }
           });
       } else {
         this.updateDebug({
@@ -471,6 +483,9 @@ class WebSoundManager implements SoundService {
         },
         lastError: `html5 play exception: ${message}`,
       });
+      if (allowRetry) {
+        window.setTimeout(() => this.playHtmlSound(event, false), 60);
+      }
     }
   }
 
@@ -497,57 +512,55 @@ class WebSoundManager implements SoundService {
   }
 
   private pickHtmlAudioInstance(sound: SoundEvent, pool: HTMLAudioElement[]) {
-    const free = pool.find((audio) => audio.paused || audio.ended);
-    if (free) return free;
+    const start = this.htmlPoolCursor[sound] % pool.length;
 
-    if (pool.length < 12) {
-      const extra = new Audio(HTML_AUDIO_SRC[sound]);
-      extra.preload = 'auto';
-      extra.playsInline = true;
-      extra.volume = this.getEffectiveVolume();
-      extra.muted = this.isMuted && !this.forceMasterGain;
-      extra.load();
-      pool.push(extra);
-      this.htmlAudioPools[sound] = pool;
-      return extra;
+    for (let i = 0; i < pool.length; i++) {
+      const idx = (start + i) % pool.length;
+      const candidate = pool[idx];
+      if ((candidate.paused || candidate.ended) && candidate.readyState >= 2) {
+        this.htmlPoolCursor[sound] = (idx + 1) % pool.length;
+        return candidate;
+      }
     }
 
-    const index = this.htmlPoolCursor[sound] % pool.length;
-    this.htmlPoolCursor[sound] = (index + 1) % pool.length;
-    const picked = pool[index];
-    picked.currentTime = 0;
-    return picked;
+    for (let i = 0; i < pool.length; i++) {
+      const idx = (start + i) % pool.length;
+      const candidate = pool[idx];
+      if (candidate.paused || candidate.ended) {
+        this.htmlPoolCursor[sound] = (idx + 1) % pool.length;
+        return candidate;
+      }
+    }
+
+    const fallback = pool[start];
+    this.htmlPoolCursor[sound] = (start + 1) % pool.length;
+    return fallback;
   }
 
   private warmupHtmlAudioPools() {
     if (this.backend !== 'html5-audio' || this.htmlPoolWarmedUp) return;
     this.htmlPoolWarmedUp = true;
-    (Object.keys(this.htmlAudioPools) as SoundEvent[]).forEach((sound) => {
-      const pool = this.htmlAudioPools[sound];
-      const first = pool?.[0];
-      if (!first) return;
-      const prevMuted = first.muted;
-      const prevVolume = first.volume;
-      first.muted = true;
-      first.volume = 0;
+    (Object.keys(HTML_AUDIO_SRC) as SoundEvent[]).forEach((sound) => {
+      const primer = new Audio(HTML_AUDIO_SRC[sound]);
+      primer.preload = 'auto';
+      primer.playsInline = true;
+      primer.muted = true;
+      primer.volume = 0;
       try {
-        const p = first.play();
+        const p = primer.play();
         if (p && typeof p.then === 'function') {
           void p
             .then(() => {
-              first.pause();
-              first.currentTime = 0;
-              first.muted = prevMuted;
-              first.volume = prevVolume;
+              primer.pause();
+              primer.currentTime = 0;
+              primer.src = '';
             })
             .catch(() => {
-              first.muted = prevMuted;
-              first.volume = prevVolume;
+              primer.src = '';
             });
         }
       } catch {
-        first.muted = prevMuted;
-        first.volume = prevVolume;
+        primer.src = '';
       }
     });
   }
