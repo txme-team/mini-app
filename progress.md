@@ -148,3 +148,7 @@ Original prompt: 내가 이전에 개발하던 게임이 있는데 그걸 이어
   - RMS monitoring via `AnalyserNode`
   - Master gain + force gain toggle + mute/localStorage display
   - Initial mute state sync from sound service into UI
+- Added HTMLAudio evidence test in debug overlay:
+  - New `TEST <audio>` button calling `new Audio('/sfx/test.mp3').play()` directly from touch/pointer handler
+  - Overlay now shows play success/failure timestamp and error message
+  - Added static asset `/Users/doyoulovez/Documents/dangdangpang/public/sfx/test.mp3` (copied from Downloads `ending.mp3`)

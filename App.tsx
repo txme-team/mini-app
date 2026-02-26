@@ -719,6 +719,12 @@ const AuthConsumer: React.FC = () => {
 const SoundDebugOverlay: React.FC = () => {
   const [debugState, setDebugState] = useState<SoundDebugState | null>(null);
   const [isMobileLike, setIsMobileLike] = useState(false);
+  const [htmlAudioResult, setHtmlAudioResult] = useState<{
+    ok: boolean;
+    at: number;
+    message: string;
+  } | null>(null);
+  const htmlAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -774,6 +780,51 @@ const SoundDebugOverlay: React.FC = () => {
     setDebugState(platformServices.sound.getDebugState?.() ?? null);
   };
 
+  const runHtmlAudioTest = () => {
+    try {
+      const audio = htmlAudioRef.current ?? new Audio('/sfx/test.mp3?v=20260226-1');
+      htmlAudioRef.current = audio;
+      audio.preload = 'auto';
+      audio.currentTime = 0;
+      audio.volume = 1;
+      audio.muted = false;
+      audio.playsInline = true;
+
+      const playResult = audio.play();
+      if (playResult && typeof playResult.then === 'function') {
+        void playResult
+          .then(() => {
+            setHtmlAudioResult({
+              ok: true,
+              at: Date.now(),
+              message: 'play() resolved',
+            });
+          })
+          .catch((error) => {
+            const message = error instanceof Error ? error.message : String(error);
+            setHtmlAudioResult({
+              ok: false,
+              at: Date.now(),
+              message: `play() rejected: ${message}`,
+            });
+          });
+      } else {
+        setHtmlAudioResult({
+          ok: true,
+          at: Date.now(),
+          message: 'play() started (no promise)',
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setHtmlAudioResult({
+        ok: false,
+        at: Date.now(),
+        message: `exception: ${message}`,
+      });
+    }
+  };
+
   return (
     <div className="fixed left-1.5 bottom-1.5 z-[200] pointer-events-auto bg-black/70 text-[#d8f0ff] text-[10px] leading-tight px-2 py-1.5 rounded max-w-[90vw]">
       <div>AUDIO {debugState.mode}</div>
@@ -788,6 +839,10 @@ const SoundDebugOverlay: React.FC = () => {
       </div>
       {debugState.lastBeep?.error && <div>beepErr: {debugState.lastBeep.error}</div>}
       <div>err: {debugState.lastError ?? 'none'}</div>
+      <div>
+        htmlAudio: {htmlAudioResult ? `${htmlAudioResult.ok ? 'ok' : 'fail'} @ ${new Date(htmlAudioResult.at).toLocaleTimeString()}` : 'n/a'}
+      </div>
+      {htmlAudioResult && <div>htmlMsg: {htmlAudioResult.message}</div>}
       <div className="mt-1 flex gap-1">
         <button
           type="button"
@@ -802,6 +857,14 @@ const SoundDebugOverlay: React.FC = () => {
           className={`px-2 py-0.5 border rounded ${debugState.forceMasterGain ? 'bg-[#2a7d5a] border-[#8cf0b0]' : 'bg-[#6c2a2a] border-[#f0a3a3]'} text-white`}
         >
           FORCE GAIN=1 {debugState.forceMasterGain ? 'ON' : 'OFF'}
+        </button>
+        <button
+          type="button"
+          onTouchStart={runHtmlAudioTest}
+          onPointerDown={runHtmlAudioTest}
+          className="px-2 py-0.5 bg-[#2e3f67] text-[#eef5ff] border border-[#9cb4ea] rounded"
+        >
+          TEST &lt;audio&gt;
         </button>
       </div>
     </div>
