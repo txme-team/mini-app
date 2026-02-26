@@ -13,8 +13,7 @@ type SoundEvent = 'select' | 'match' | 'store' | 'error' | 'gameover' | 'levelco
 type AudioBackend = 'web-audio' | 'html5-audio' | 'rn-bridge';
 
 const MUTE_STORAGE_KEY = 'dangdangpang:isMuted';
-const HTML_POOL_SIZE = 8;
-const IOS_BACKEND_STORAGE_KEY = 'dangdangpang:ios_sfx_backend';
+const HTML_POOL_SIZE = 5;
 const HTML_AUDIO_VERSION = '20260226-1';
 const HTML_AUDIO_SRC: Record<SoundEvent, string> = {
   select: `/sfx/select.mp3?v=${HTML_AUDIO_VERSION}`,
@@ -52,11 +51,6 @@ class WebSoundManager implements SoundService {
   private htmlPoolReady = false;
   private htmlPoolWarmedUp = false;
 
-  private iosBufferCtx: AudioContext | null = null;
-  private iosBufferCache: Partial<Record<SoundEvent, AudioBuffer>> = {};
-  private iosBufferReady = false;
-  private iosBufferLoading = false;
-
   constructor() {
     this.storedMutedValue = this.readStoredMuted();
     this.isMuted = this.storedMutedValue === 'true';
@@ -78,7 +72,6 @@ class WebSoundManager implements SoundService {
 
     if (this.backend === 'html5-audio') {
       this.ensureHtmlAudioPools();
-      this.prepareIOSBufferBackend();
     }
     if (this.backend === 'web-audio') {
       this.attachLifecycleResumeHandlers();
@@ -91,7 +84,6 @@ class WebSoundManager implements SoundService {
     if (this.backend === 'html5-audio') {
       this.ensureHtmlAudioPools();
       this.warmupHtmlAudioPools();
-      this.prepareIOSBufferBackend();
       this.updateDebug({
         lastResume: { ok: true, at: Date.now(), reason: 'html5-init' },
       });
@@ -385,11 +377,6 @@ class WebSoundManager implements SoundService {
     }
 
     if (this.backend === 'html5-audio') {
-      const requestAt = performance.now();
-      if (this.shouldUseIOSBufferBackend()) {
-        const played = this.playIOSBufferSound(event, requestAt);
-        if (played) return;
-      }
       this.playHtmlSound(event);
       return;
     }
@@ -408,9 +395,8 @@ class WebSoundManager implements SoundService {
     });
   }
 
-  private playHtmlSound(event: SoundEvent, allowRetry = true) {
+  private playHtmlSound(event: SoundEvent) {
     this.ensureHtmlAudioPools();
-    const requestAt = performance.now();
     const pool = this.htmlAudioPools[event];
     if (!pool || pool.length === 0) {
       this.updateDebug({
@@ -430,29 +416,10 @@ class WebSoundManager implements SoundService {
     const index = pool.indexOf(audio);
     audio.volume = this.getEffectiveVolume();
     audio.muted = this.isMuted && !this.forceMasterGain;
-
     try {
-      // iOS Safari can leave elements in a pseudo-playing silent state.
-      // Always hard-reset before replaying.
-      if (!audio.paused && !audio.ended) {
-        audio.pause();
+      if (audio.paused || audio.ended) {
+        audio.currentTime = 0;
       }
-      try {
-        if (audio.readyState > 0) {
-          audio.currentTime = 0;
-        }
-      } catch {
-        // iOS can throw if currentTime is set before metadata is ready.
-      }
-      const onPlaying = () => {
-        const latency = performance.now() - requestAt;
-        console.log(`[SFX-LATENCY] html5 ${event} playing in ${latency.toFixed(1)}ms (pool#${index})`);
-      };
-      const onEnded = () => {
-        // no-op
-      };
-      audio.addEventListener('playing', onPlaying, { once: true });
-      audio.addEventListener('ended', onEnded, { once: true });
       const promise = audio.play();
       if (promise && typeof promise.then === 'function') {
         void promise
@@ -467,19 +434,9 @@ class WebSoundManager implements SoundService {
               },
               lastError: null,
             });
-            const isCritical = event === 'gameover' || event === 'levelcomplete' || event === 'ending';
-            if (isCritical && allowRetry) {
-              window.setTimeout(() => {
-                const noProgress = audio.currentTime < 0.02 && audio.paused;
-                if (noProgress) {
-                  this.playHtmlSound(event, false);
-                }
-              }, 140);
-            }
           })
           .catch((error) => {
             const message = error instanceof Error ? error.message : String(error);
-            console.warn(`[SFX-PLAY] html5 reject ${event} pool#${index}: ${message}`);
             this.updateDebug({
               lastPlay: {
                 ok: false,
@@ -490,9 +447,6 @@ class WebSoundManager implements SoundService {
               },
               lastError: `html5 play rejected: ${message}`,
             });
-            if (allowRetry) {
-              window.setTimeout(() => this.playHtmlSound(event, false), 90);
-            }
           });
       } else {
         this.updateDebug({
@@ -507,7 +461,6 @@ class WebSoundManager implements SoundService {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[SFX-PLAY] html5 exception ${event} pool#${index}: ${message}`);
       this.updateDebug({
         lastPlay: {
           ok: false,
@@ -518,9 +471,6 @@ class WebSoundManager implements SoundService {
         },
         lastError: `html5 play exception: ${message}`,
       });
-      if (allowRetry) {
-        window.setTimeout(() => this.playHtmlSound(event, false), 90);
-      }
     }
   }
 
@@ -547,131 +497,59 @@ class WebSoundManager implements SoundService {
   }
 
   private pickHtmlAudioInstance(sound: SoundEvent, pool: HTMLAudioElement[]) {
-    const size = pool.length;
-    const start = this.htmlPoolCursor[sound] % size;
+    const free = pool.find((audio) => audio.paused || audio.ended);
+    if (free) return free;
 
-    // 1) Prefer idle+ready entries to avoid cutting currently playing sounds.
-    for (let i = 0; i < size; i++) {
-      const idx = (start + i) % size;
-      const candidate = pool[idx];
-      if (candidate.readyState >= 2 && (candidate.paused || candidate.ended)) {
-        this.htmlPoolCursor[sound] = (idx + 1) % size;
-        return candidate;
-      }
+    if (pool.length < 12) {
+      const extra = new Audio(HTML_AUDIO_SRC[sound]);
+      extra.preload = 'auto';
+      extra.playsInline = true;
+      extra.volume = this.getEffectiveVolume();
+      extra.muted = this.isMuted && !this.forceMasterGain;
+      extra.load();
+      pool.push(extra);
+      this.htmlAudioPools[sound] = pool;
+      return extra;
     }
 
-    // 2) If no ready idle entry, still prefer any idle entry.
-    for (let i = 0; i < size; i++) {
-      const idx = (start + i) % size;
-      const candidate = pool[idx];
-      if (candidate.paused || candidate.ended) {
-        this.htmlPoolCursor[sound] = (idx + 1) % size;
-        return candidate;
-      }
-    }
-
-    // 3) Fallback: all entries busy, use round-robin slot.
-    const fallback = pool[start];
-    this.htmlPoolCursor[sound] = (start + 1) % size;
-    return fallback;
+    const index = this.htmlPoolCursor[sound] % pool.length;
+    this.htmlPoolCursor[sound] = (index + 1) % pool.length;
+    const picked = pool[index];
+    picked.currentTime = 0;
+    return picked;
   }
 
   private warmupHtmlAudioPools() {
     if (this.backend !== 'html5-audio' || this.htmlPoolWarmedUp) return;
     this.htmlPoolWarmedUp = true;
-    // iOS Safari can drop early user-triggered SFX if we aggressively play/pause many
-    // hidden primer sounds at startup. Keep warmup as preload-only.
     (Object.keys(this.htmlAudioPools) as SoundEvent[]).forEach((sound) => {
       const pool = this.htmlAudioPools[sound];
-      if (!pool) return;
-      pool.forEach((audio) => {
-        try {
-          if (audio.readyState < 2) audio.load();
-        } catch {
-          // No-op
+      const first = pool?.[0];
+      if (!first) return;
+      const prevMuted = first.muted;
+      const prevVolume = first.volume;
+      first.muted = true;
+      first.volume = 0;
+      try {
+        const p = first.play();
+        if (p && typeof p.then === 'function') {
+          void p
+            .then(() => {
+              first.pause();
+              first.currentTime = 0;
+              first.muted = prevMuted;
+              first.volume = prevVolume;
+            })
+            .catch(() => {
+              first.muted = prevMuted;
+              first.volume = prevVolume;
+            });
         }
-      });
-    });
-  }
-
-  private shouldUseIOSBufferBackend() {
-    if (typeof window === 'undefined') return false;
-    const ua = window.navigator.userAgent || '';
-    const isiOS = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
-    if (!isiOS) return false;
-    try {
-      const pref = window.localStorage.getItem(IOS_BACKEND_STORAGE_KEY);
-      return pref === 'buffer' && this.iosBufferReady;
-    } catch {
-      return false;
-    }
-  }
-
-  private prepareIOSBufferBackend() {
-    if (this.iosBufferReady || this.iosBufferLoading || typeof window === 'undefined') return;
-    const ua = window.navigator.userAgent || '';
-    const isiOS = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
-    if (!isiOS) return;
-
-    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContextClass) return;
-
-    this.iosBufferLoading = true;
-    this.iosBufferCtx = this.iosBufferCtx ?? new AudioContextClass({ latencyHint: 'interactive' } as AudioContextOptions);
-
-    const tasks = (Object.keys(HTML_AUDIO_SRC) as SoundEvent[]).map(async (sound) => {
-      const res = await fetch(HTML_AUDIO_SRC[sound], { cache: 'force-cache' });
-      const ab = await res.arrayBuffer();
-      const decoded = await this.iosBufferCtx!.decodeAudioData(ab.slice(0));
-      this.iosBufferCache[sound] = decoded;
-    });
-
-    void Promise.all(tasks)
-      .then(() => {
-        this.iosBufferReady = true;
-        console.log('[SFX-BUFFER] iOS buffer backend prepared');
-      })
-      .catch((error) => {
-        console.warn('[SFX-BUFFER] prepare failed, fallback html5', error);
-        this.iosBufferReady = false;
-      })
-      .finally(() => {
-        this.iosBufferLoading = false;
-      });
-  }
-
-  private playIOSBufferSound(event: SoundEvent, requestAt: number) {
-    if (!this.iosBufferReady || !this.iosBufferCtx) return false;
-    const buffer = this.iosBufferCache[event];
-    if (!buffer) return false;
-    try {
-      if (this.iosBufferCtx.state === 'suspended') {
-        void this.iosBufferCtx.resume();
+      } catch {
+        first.muted = prevMuted;
+        first.volume = prevVolume;
       }
-      const src = this.iosBufferCtx.createBufferSource();
-      const gain = this.iosBufferCtx.createGain();
-      gain.gain.value = this.getEffectiveVolume();
-      src.buffer = buffer;
-      src.connect(gain);
-      gain.connect(this.iosBufferCtx.destination);
-      src.start(0);
-      const latency = performance.now() - requestAt;
-      console.log(`[SFX-LATENCY] ios-buffer ${event} start in ${latency.toFixed(1)}ms`);
-      this.updateDebug({
-        lastPlay: {
-          ok: true,
-          at: Date.now(),
-          backend: 'web-audio',
-          sound: event,
-          message: 'ios-buffer source start',
-        },
-      });
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`[SFX-BUFFER] play failed ${event}, fallback html5: ${message}`);
-      return false;
-    }
+    });
   }
 
   private syncHtmlAudioVolumes() {
