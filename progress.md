@@ -152,3 +152,9 @@ Original prompt: 내가 이전에 개발하던 게임이 있는데 그걸 이어
   - New `TEST <audio>` button calling `new Audio('/sfx/test.mp3').play()` directly from touch/pointer handler
   - Overlay now shows play success/failure timestamp and error message
   - Added static asset `/Users/doyoulovez/Documents/dangdangpang/public/sfx/test.mp3` (copied from Downloads `ending.mp3`)
+- Finalized iOS web SFX backend switch:
+  - Backend routing: iOS mobile web -> `html5-audio`, PC/Android web -> `web-audio`, RN WebView -> `rn-bridge`
+  - iOS path now uses HTMLAudio pool (5 instances per sound) with `preload=auto`, `playsInline=true`, `volume=1` and `currentTime=0; play()`
+  - Added `/public/sfx/{select,match,store,error,gameover,levelcomplete,ending}.mp3`
+  - Updated debug overlay fields: backend, lastPlay result/message, mute, volume
+  - iOS mode blocks WebAudio context creation entirely

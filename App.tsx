@@ -763,6 +763,7 @@ const SoundDebugOverlay: React.FC = () => {
     ? `${debugState.lastResume.ok ? 'ok' : 'fail'} (${debugState.lastResume.reason}) @ ${when}`
     : 'n/a';
   const beepWhen = debugState.lastBeep ? new Date(debugState.lastBeep.at).toLocaleTimeString() : '-';
+  const playWhen = debugState.lastPlay ? new Date(debugState.lastPlay.at).toLocaleTimeString() : '-';
   const rmsLabel = debugState.rms.toFixed(3);
   const rmsState =
     debugState.rms <= 0.001 ? 'zero' :
@@ -827,13 +828,15 @@ const SoundDebugOverlay: React.FC = () => {
 
   return (
     <div className="fixed left-1.5 bottom-1.5 z-[200] pointer-events-auto bg-black/70 text-[#d8f0ff] text-[10px] leading-tight px-2 py-1.5 rounded max-w-[90vw]">
-      <div>AUDIO {debugState.mode}</div>
+      <div>backend: {debugState.mode}</div>
       <div>state: {debugState.contextState}</div>
       <div>unlock: {debugState.unlocked ? 'yes' : 'no'}</div>
       <div>resume: {resumeStatus}</div>
       <div>rms: {rmsLabel} ({rmsState})</div>
-      <div>master: {debugState.masterGain.toFixed(2)} force:{debugState.forceMasterGain ? 'on' : 'off'}</div>
-      <div>muted: {debugState.muted ? 'yes' : 'no'} storage: {debugState.storedMuted ?? 'null'}</div>
+      <div>volume: {debugState.masterGain.toFixed(2)} force:{debugState.forceMasterGain ? 'on' : 'off'}</div>
+      <div>mute: {debugState.muted ? 'on' : 'off'} storage: {debugState.storedMuted ?? 'null'}</div>
+      <div>lastPlay: {debugState.lastPlay ? `${debugState.lastPlay.ok ? 'ok' : 'fail'} ${debugState.lastPlay.sound} @ ${playWhen}` : 'n/a'}</div>
+      {debugState.lastPlay && <div>playMsg: {debugState.lastPlay.message}</div>}
       <div>
         beep: {debugState.lastBeep ? `${debugState.lastBeep.started ? 'start' : 'no-start'}/${debugState.lastBeep.stopped ? 'stop' : 'no-stop'} @ ${beepWhen}` : 'n/a'}
       </div>
@@ -843,7 +846,7 @@ const SoundDebugOverlay: React.FC = () => {
         htmlAudio: {htmlAudioResult ? `${htmlAudioResult.ok ? 'ok' : 'fail'} @ ${new Date(htmlAudioResult.at).toLocaleTimeString()}` : 'n/a'}
       </div>
       {htmlAudioResult && <div>htmlMsg: {htmlAudioResult.message}</div>}
-      <div className="mt-1 flex gap-1">
+      <div className="mt-1 flex flex-wrap gap-1">
         <button
           type="button"
           onPointerDown={runBeep}

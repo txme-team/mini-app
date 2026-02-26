@@ -1,7 +1,7 @@
 import { RankingEntry } from '../types';
 
 export type SoundDebugState = {
-  mode: 'web-audio' | 'rn-bridge';
+  mode: 'web-audio' | 'html5-audio' | 'rn-bridge';
   contextState: AudioContextState | 'none';
   unlocked: boolean;
   rms: number;
@@ -14,6 +14,13 @@ export type SoundDebugState = {
     stopped: boolean;
     at: number;
     error?: string;
+  } | null;
+  lastPlay: {
+    ok: boolean;
+    at: number;
+    backend: 'web-audio' | 'html5-audio' | 'rn-bridge';
+    sound: string;
+    message: string;
   } | null;
   lastResume: {
     ok: boolean;
