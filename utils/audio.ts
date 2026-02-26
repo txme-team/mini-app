@@ -418,7 +418,7 @@ class WebSoundManager implements SoundService {
     });
   }
 
-  private playHtmlSound(event: SoundEvent) {
+  private playHtmlSound(event: SoundEvent, allowRetry = true) {
     this.ensureHtmlAudioPools();
     const requestAt = performance.now();
     const pool = this.htmlAudioPools[event];
@@ -473,6 +473,15 @@ class WebSoundManager implements SoundService {
               },
               lastError: null,
             });
+            const isCritical = event === 'gameover' || event === 'levelcomplete' || event === 'ending';
+            if (isCritical && allowRetry) {
+              window.setTimeout(() => {
+                const noProgress = audio.currentTime < 0.02 && (audio.paused || !audio.ended);
+                if (noProgress) {
+                  this.playHtmlSound(event, false);
+                }
+              }, 140);
+            }
           })
           .catch((error) => {
             const message = error instanceof Error ? error.message : String(error);
@@ -488,6 +497,9 @@ class WebSoundManager implements SoundService {
               },
               lastError: `html5 play rejected: ${message}`,
             });
+            if (allowRetry) {
+              window.setTimeout(() => this.playHtmlSound(event, false), 90);
+            }
           });
       } else {
         this.updateDebug({
@@ -514,6 +526,9 @@ class WebSoundManager implements SoundService {
         },
         lastError: `html5 play exception: ${message}`,
       });
+      if (allowRetry) {
+        window.setTimeout(() => this.playHtmlSound(event, false), 90);
+      }
     }
   }
 
@@ -562,28 +577,18 @@ class WebSoundManager implements SoundService {
   private warmupHtmlAudioPools() {
     if (this.backend !== 'html5-audio' || this.htmlPoolWarmedUp) return;
     this.htmlPoolWarmedUp = true;
-    (Object.keys(HTML_AUDIO_SRC) as SoundEvent[]).forEach((sound) => {
-      const primer = new Audio(HTML_AUDIO_SRC[sound]);
-      primer.preload = 'auto';
-      primer.playsInline = true;
-      primer.muted = true;
-      primer.volume = 0;
-      try {
-        const p = primer.play();
-        if (p && typeof p.then === 'function') {
-          void p
-            .then(() => {
-              primer.pause();
-              primer.currentTime = 0;
-              primer.src = '';
-            })
-            .catch(() => {
-              primer.src = '';
-            });
+    // iOS Safari can drop early user-triggered SFX if we aggressively play/pause many
+    // hidden primer sounds at startup. Keep warmup as preload-only.
+    (Object.keys(this.htmlAudioPools) as SoundEvent[]).forEach((sound) => {
+      const pool = this.htmlAudioPools[sound];
+      if (!pool) return;
+      pool.forEach((audio) => {
+        try {
+          if (audio.readyState < 2) audio.load();
+        } catch {
+          // No-op
         }
-      } catch {
-        primer.src = '';
-      }
+      });
     });
   }
 
