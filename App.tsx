@@ -3,7 +3,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createBoard, findPath, hasPossibleMoves, shuffleBoard, findAvailableMatch } from './utils/gameLogic';
 import { evaluateMatchReward, shouldRunGameTimer } from './utils/gameSession';
 import { platformServices } from './services/platformServices';
-import type { SoundDebugState } from './services/contracts';
 import { AuthProvider, useAuth } from './contexts/AuthContext'; 
 import LoginScreen from './components/LoginScreen'; 
 import AppErrorBoundary from './components/AppErrorBoundary';
@@ -694,184 +693,15 @@ const AuthConsumer: React.FC = () => {
         return (
              <div className="h-screen w-screen bg-retro-stripe flex items-center justify-center">
                  <div className="text-xl font-bold text-[#fff2c6] animate-bounce" style={{ textShadow: '2px 2px 0 #1a2242' }}>LOADING...</div>
-                 <SoundDebugOverlay />
              </div>
         );
     }
 
     if (!user) {
-        return (
-          <>
-            <LoginScreen />
-            <SoundDebugOverlay />
-          </>
-        );
+        return <LoginScreen />;
     }
 
-    return (
-      <>
-        <GameApp />
-        <SoundDebugOverlay />
-      </>
-    );
+    return <GameApp />;
 }
-
-const SoundDebugOverlay: React.FC = () => {
-  const [debugState, setDebugState] = useState<SoundDebugState | null>(null);
-  const [isMobileLike, setIsMobileLike] = useState(false);
-  const [htmlAudioResult, setHtmlAudioResult] = useState<{
-    ok: boolean;
-    at: number;
-    message: string;
-  } | null>(null);
-  const htmlAudioRef = useRef<HTMLAudioElement | null>(null);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const updateViewport = () => {
-      const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
-      setIsMobileLike(coarse || window.innerWidth <= 900);
-    };
-    updateViewport();
-    window.addEventListener('resize', updateViewport);
-
-    const sound = platformServices.sound;
-    const apply = (state?: SoundDebugState | null) => {
-      setDebugState(state ?? sound.getDebugState?.() ?? null);
-    };
-    apply();
-
-    const onDebug = (event: Event) => {
-      const custom = event as CustomEvent<SoundDebugState>;
-      apply(custom.detail);
-    };
-    window.addEventListener('dangdang:sound-debug', onDebug as EventListener);
-    const poll = window.setInterval(() => apply(), 1200);
-
-    return () => {
-      window.removeEventListener('resize', updateViewport);
-      window.removeEventListener('dangdang:sound-debug', onDebug as EventListener);
-      window.clearInterval(poll);
-    };
-  }, []);
-
-  if (!isMobileLike || !debugState) return null;
-
-  const when = debugState.lastResume ? new Date(debugState.lastResume.at).toLocaleTimeString() : '-';
-  const resumeStatus = debugState.lastResume
-    ? `${debugState.lastResume.ok ? 'ok' : 'fail'} (${debugState.lastResume.reason}) @ ${when}`
-    : 'n/a';
-  const beepWhen = debugState.lastBeep ? new Date(debugState.lastBeep.at).toLocaleTimeString() : '-';
-  const playWhen = debugState.lastPlay ? new Date(debugState.lastPlay.at).toLocaleTimeString() : '-';
-  const rmsLabel = debugState.rms.toFixed(3);
-  const rmsState =
-    debugState.rms <= 0.001 ? 'zero' :
-    debugState.rms >= 0.05 ? 'audible' :
-    'low';
-
-  const runBeep = () => {
-    platformServices.sound.forceUnlockFromUserGesture?.('overlay-beep');
-    platformServices.sound.debugBeep?.();
-    setDebugState(platformServices.sound.getDebugState?.() ?? null);
-  };
-
-  const toggleForceGain = () => {
-    platformServices.sound.setDebugForceMasterGain?.(!debugState.forceMasterGain);
-    setDebugState(platformServices.sound.getDebugState?.() ?? null);
-  };
-
-  const runHtmlAudioTest = () => {
-    try {
-      const audio = htmlAudioRef.current ?? new Audio('/sfx/test.mp3?v=20260226-1');
-      htmlAudioRef.current = audio;
-      audio.preload = 'auto';
-      audio.currentTime = 0;
-      audio.volume = 1;
-      audio.muted = false;
-      audio.playsInline = true;
-
-      const playResult = audio.play();
-      if (playResult && typeof playResult.then === 'function') {
-        void playResult
-          .then(() => {
-            setHtmlAudioResult({
-              ok: true,
-              at: Date.now(),
-              message: 'play() resolved',
-            });
-          })
-          .catch((error) => {
-            const message = error instanceof Error ? error.message : String(error);
-            setHtmlAudioResult({
-              ok: false,
-              at: Date.now(),
-              message: `play() rejected: ${message}`,
-            });
-          });
-      } else {
-        setHtmlAudioResult({
-          ok: true,
-          at: Date.now(),
-          message: 'play() started (no promise)',
-        });
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setHtmlAudioResult({
-        ok: false,
-        at: Date.now(),
-        message: `exception: ${message}`,
-      });
-    }
-  };
-
-  return (
-    <div className="fixed left-1.5 bottom-1.5 z-[200] pointer-events-auto bg-black/70 text-[#d8f0ff] text-[10px] leading-tight px-2 py-1.5 rounded max-w-[90vw]">
-      <div>backend: {debugState.mode}</div>
-      <div>state: {debugState.contextState}</div>
-      <div>unlock: {debugState.unlocked ? 'yes' : 'no'}</div>
-      <div>resume: {resumeStatus}</div>
-      <div>rms: {rmsLabel} ({rmsState})</div>
-      <div>volume: {debugState.masterGain.toFixed(2)} force:{debugState.forceMasterGain ? 'on' : 'off'}</div>
-      <div>mute: {debugState.muted ? 'on' : 'off'} storage: {debugState.storedMuted ?? 'null'}</div>
-      <div>lastPlay: {debugState.lastPlay ? `${debugState.lastPlay.ok ? 'ok' : 'fail'} ${debugState.lastPlay.sound} @ ${playWhen}` : 'n/a'}</div>
-      {debugState.lastPlay && <div>playMsg: {debugState.lastPlay.message}</div>}
-      <div>
-        beep: {debugState.lastBeep ? `${debugState.lastBeep.started ? 'start' : 'no-start'}/${debugState.lastBeep.stopped ? 'stop' : 'no-stop'} @ ${beepWhen}` : 'n/a'}
-      </div>
-      {debugState.lastBeep?.error && <div>beepErr: {debugState.lastBeep.error}</div>}
-      <div>err: {debugState.lastError ?? 'none'}</div>
-      <div>
-        htmlAudio: {htmlAudioResult ? `${htmlAudioResult.ok ? 'ok' : 'fail'} @ ${new Date(htmlAudioResult.at).toLocaleTimeString()}` : 'n/a'}
-      </div>
-      {htmlAudioResult && <div>htmlMsg: {htmlAudioResult.message}</div>}
-      <div className="mt-1 flex flex-wrap gap-1">
-        <button
-          type="button"
-          onPointerDown={runBeep}
-          className="px-2 py-0.5 bg-[#1f4e7e] text-[#dff3ff] border border-[#8ec4e9] rounded"
-        >
-          BEEP
-        </button>
-        <button
-          type="button"
-          onPointerDown={toggleForceGain}
-          className={`px-2 py-0.5 border rounded ${debugState.forceMasterGain ? 'bg-[#2a7d5a] border-[#8cf0b0]' : 'bg-[#6c2a2a] border-[#f0a3a3]'} text-white`}
-        >
-          FORCE GAIN=1 {debugState.forceMasterGain ? 'ON' : 'OFF'}
-        </button>
-        <button
-          type="button"
-          onTouchStart={runHtmlAudioTest}
-          onPointerDown={runHtmlAudioTest}
-          className="px-2 py-0.5 bg-[#2e3f67] text-[#eef5ff] border border-[#9cb4ea] rounded"
-        >
-          TEST &lt;audio&gt;
-        </button>
-      </div>
-    </div>
-  );
-};
 
 export default App;

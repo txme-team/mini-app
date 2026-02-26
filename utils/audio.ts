@@ -49,6 +49,7 @@ class WebSoundManager implements SoundService {
     ending: 0,
   };
   private htmlPoolReady = false;
+  private htmlPoolWarmedUp = false;
 
   constructor() {
     this.storedMutedValue = this.readStoredMuted();
@@ -82,6 +83,7 @@ class WebSoundManager implements SoundService {
     if (this.backend === 'rn-bridge') return;
     if (this.backend === 'html5-audio') {
       this.ensureHtmlAudioPools();
+      this.warmupHtmlAudioPools();
       this.updateDebug({
         lastResume: { ok: true, at: Date.now(), reason: 'html5-init' },
       });
@@ -410,13 +412,14 @@ class WebSoundManager implements SoundService {
       return;
     }
 
-    const index = this.htmlPoolCursor[event] % pool.length;
-    this.htmlPoolCursor[event] = (index + 1) % pool.length;
-    const audio = pool[index];
+    const audio = this.pickHtmlAudioInstance(event, pool);
+    const index = pool.indexOf(audio);
     audio.volume = this.getEffectiveVolume();
     audio.muted = this.isMuted && !this.forceMasterGain;
     try {
-      audio.currentTime = 0;
+      if (audio.paused || audio.ended) {
+        audio.currentTime = 0;
+      }
       const promise = audio.play();
       if (promise && typeof promise.then === 'function') {
         void promise
@@ -480,6 +483,7 @@ class WebSoundManager implements SoundService {
         audio.playsInline = true;
         audio.volume = this.getEffectiveVolume();
         audio.muted = this.isMuted && !this.forceMasterGain;
+        audio.load();
         return audio;
       });
     });
@@ -489,6 +493,62 @@ class WebSoundManager implements SoundService {
       muted: this.isMuted,
       storedMuted: this.storedMutedValue,
       forceMasterGain: this.forceMasterGain,
+    });
+  }
+
+  private pickHtmlAudioInstance(sound: SoundEvent, pool: HTMLAudioElement[]) {
+    const free = pool.find((audio) => audio.paused || audio.ended);
+    if (free) return free;
+
+    if (pool.length < 12) {
+      const extra = new Audio(HTML_AUDIO_SRC[sound]);
+      extra.preload = 'auto';
+      extra.playsInline = true;
+      extra.volume = this.getEffectiveVolume();
+      extra.muted = this.isMuted && !this.forceMasterGain;
+      extra.load();
+      pool.push(extra);
+      this.htmlAudioPools[sound] = pool;
+      return extra;
+    }
+
+    const index = this.htmlPoolCursor[sound] % pool.length;
+    this.htmlPoolCursor[sound] = (index + 1) % pool.length;
+    const picked = pool[index];
+    picked.currentTime = 0;
+    return picked;
+  }
+
+  private warmupHtmlAudioPools() {
+    if (this.backend !== 'html5-audio' || this.htmlPoolWarmedUp) return;
+    this.htmlPoolWarmedUp = true;
+    (Object.keys(this.htmlAudioPools) as SoundEvent[]).forEach((sound) => {
+      const pool = this.htmlAudioPools[sound];
+      const first = pool?.[0];
+      if (!first) return;
+      const prevMuted = first.muted;
+      const prevVolume = first.volume;
+      first.muted = true;
+      first.volume = 0;
+      try {
+        const p = first.play();
+        if (p && typeof p.then === 'function') {
+          void p
+            .then(() => {
+              first.pause();
+              first.currentTime = 0;
+              first.muted = prevMuted;
+              first.volume = prevVolume;
+            })
+            .catch(() => {
+              first.muted = prevMuted;
+              first.volume = prevVolume;
+            });
+        }
+      } catch {
+        first.muted = prevMuted;
+        first.volume = prevVolume;
+      }
     });
   }
 
