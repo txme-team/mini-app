@@ -61,7 +61,6 @@ class WebSoundManager implements SoundService {
   };
   private htmlPoolReady = false;
   private htmlPoolWarmedUp = false;
-  private htmlDeferredPlayLock: Partial<Record<SoundEvent, boolean>> = {};
 
   private iosBufferCtx: AudioContext | null = null;
   private iosBufferCache: Partial<Record<SoundEvent, AudioBuffer>> = {};
@@ -444,20 +443,6 @@ class WebSoundManager implements SoundService {
     audio.volume = this.getEffectiveVolume();
     audio.muted = this.isMuted && !this.forceMasterGain;
 
-    if (audio.readyState < 2) {
-      this.deferHtmlSoundUntilReady(event, audio, allowRetry);
-      this.updateDebug({
-        lastPlay: {
-          ok: false,
-          at: Date.now(),
-          backend: 'html5-audio',
-          sound: event,
-          message: `pool#${index} deferred (readyState=${audio.readyState})`,
-        },
-      });
-      return;
-    }
-
     try {
       try {
         if (audio.readyState > 0) {
@@ -548,31 +533,6 @@ class WebSoundManager implements SoundService {
     }
   }
 
-  private deferHtmlSoundUntilReady(event: SoundEvent, audio: HTMLAudioElement, allowRetry: boolean) {
-    if (this.htmlDeferredPlayLock[event]) return;
-    this.htmlDeferredPlayLock[event] = true;
-    const release = () => {
-      this.htmlDeferredPlayLock[event] = false;
-    };
-
-    const onReady = () => {
-      release();
-      this.playHtmlSound(event, false);
-    };
-    const onTimeout = () => {
-      release();
-      if (allowRetry) this.playHtmlSound(event, false);
-    };
-
-    audio.addEventListener('canplay', onReady, { once: true });
-    window.setTimeout(onTimeout, 180);
-    try {
-      audio.load();
-    } catch {
-      // No-op
-    }
-  }
-
   private ensureHtmlAudioPools() {
     if (this.backend !== 'html5-audio' || this.htmlPoolReady || typeof window === 'undefined') return;
     (Object.keys(HTML_AUDIO_SRC) as SoundEvent[]).forEach((sound) => {
@@ -597,6 +557,14 @@ class WebSoundManager implements SoundService {
 
   private pickHtmlAudioInstance(sound: SoundEvent, pool: HTMLAudioElement[]) {
     const now = performance.now();
+    const readyFree = pool.find(
+      (audio) => audio.readyState >= 2 && (audio.paused || audio.ended) && (this.htmlBusyUntil.get(audio) ?? 0) <= now
+    );
+    if (readyFree) return readyFree;
+
+    const readyAny = pool.find((audio) => audio.readyState >= 2 && (this.htmlBusyUntil.get(audio) ?? 0) <= now);
+    if (readyAny) return readyAny;
+
     const free = pool.find((audio) => (audio.paused || audio.ended) && (this.htmlBusyUntil.get(audio) ?? 0) <= now);
     if (free) return free;
 
