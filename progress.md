@@ -143,3 +143,8 @@ Original prompt: 내가 이전에 개발하던 게임이 있는데 그걸 이어
 - Validation:
   - `npm run build` passed.
   - `cd mobile && npx tsc --noEmit` passed.
+- Added evidence-first audio diagnostics:
+  - Overlay `BEEP` button (1000Hz, 300ms, gain=0.25, explicit destination path)
+  - RMS monitoring via `AnalyserNode`
+  - Master gain + force gain toggle + mute/localStorage display
+  - Initial mute state sync from sound service into UI

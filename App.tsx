@@ -79,6 +79,13 @@ const GameApp: React.FC = () => {
     ads.init();
   }, [ads]);
 
+  useEffect(() => {
+    const initialMute = sound.getDebugState?.().muted;
+    if (typeof initialMute === 'boolean') {
+      setIsMuted(initialMute);
+    }
+  }, [sound]);
+
   // --- Back Button Handling (History API) ---
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -749,14 +756,54 @@ const SoundDebugOverlay: React.FC = () => {
   const resumeStatus = debugState.lastResume
     ? `${debugState.lastResume.ok ? 'ok' : 'fail'} (${debugState.lastResume.reason}) @ ${when}`
     : 'n/a';
+  const beepWhen = debugState.lastBeep ? new Date(debugState.lastBeep.at).toLocaleTimeString() : '-';
+  const rmsLabel = debugState.rms.toFixed(3);
+  const rmsState =
+    debugState.rms <= 0.001 ? 'zero' :
+    debugState.rms >= 0.05 ? 'audible' :
+    'low';
+
+  const runBeep = () => {
+    platformServices.sound.forceUnlockFromUserGesture?.('overlay-beep');
+    platformServices.sound.debugBeep?.();
+    setDebugState(platformServices.sound.getDebugState?.() ?? null);
+  };
+
+  const toggleForceGain = () => {
+    platformServices.sound.setDebugForceMasterGain?.(!debugState.forceMasterGain);
+    setDebugState(platformServices.sound.getDebugState?.() ?? null);
+  };
 
   return (
-    <div className="fixed left-1.5 bottom-1.5 z-[200] pointer-events-none bg-black/70 text-[#d8f0ff] text-[10px] leading-tight px-2 py-1.5 rounded max-w-[90vw]">
+    <div className="fixed left-1.5 bottom-1.5 z-[200] pointer-events-auto bg-black/70 text-[#d8f0ff] text-[10px] leading-tight px-2 py-1.5 rounded max-w-[90vw]">
       <div>AUDIO {debugState.mode}</div>
       <div>state: {debugState.contextState}</div>
       <div>unlock: {debugState.unlocked ? 'yes' : 'no'}</div>
       <div>resume: {resumeStatus}</div>
+      <div>rms: {rmsLabel} ({rmsState})</div>
+      <div>master: {debugState.masterGain.toFixed(2)} force:{debugState.forceMasterGain ? 'on' : 'off'}</div>
+      <div>muted: {debugState.muted ? 'yes' : 'no'} storage: {debugState.storedMuted ?? 'null'}</div>
+      <div>
+        beep: {debugState.lastBeep ? `${debugState.lastBeep.started ? 'start' : 'no-start'}/${debugState.lastBeep.stopped ? 'stop' : 'no-stop'} @ ${beepWhen}` : 'n/a'}
+      </div>
+      {debugState.lastBeep?.error && <div>beepErr: {debugState.lastBeep.error}</div>}
       <div>err: {debugState.lastError ?? 'none'}</div>
+      <div className="mt-1 flex gap-1">
+        <button
+          type="button"
+          onPointerDown={runBeep}
+          className="px-2 py-0.5 bg-[#1f4e7e] text-[#dff3ff] border border-[#8ec4e9] rounded"
+        >
+          BEEP
+        </button>
+        <button
+          type="button"
+          onPointerDown={toggleForceGain}
+          className={`px-2 py-0.5 border rounded ${debugState.forceMasterGain ? 'bg-[#2a7d5a] border-[#8cf0b0]' : 'bg-[#6c2a2a] border-[#f0a3a3]'} text-white`}
+        >
+          FORCE GAIN=1 {debugState.forceMasterGain ? 'ON' : 'OFF'}
+        </button>
+      </div>
     </div>
   );
 };

@@ -19,23 +19,38 @@ type NativeSoundEvent =
   | 'levelcomplete'
   | 'ending';
 
+const MUTE_STORAGE_KEY = 'dangdangpang:isMuted';
+
 // A simple web-audio synth implementation.
 class WebSoundManager implements SoundService {
   private ctx: AudioContext | null = null;
   private isMuted: boolean = false;
+  private storedMutedValue: string | null = null;
   private bgmOscillators: OscillatorNode[] = [];
   private bgmGain: GainNode | null = null;
   private isBgmPlaying: boolean = false;
   private didUnlock: boolean = false;
   private isRNWebView: boolean;
+  private masterGainNode: GainNode | null = null;
+  private analyserNode: AnalyserNode | null = null;
+  private forceMasterGain = false;
+  private rmsTimer: number | null = null;
   private debug: SoundDebugState;
 
   constructor() {
     this.isRNWebView = this.detectRNWebView();
+    this.storedMutedValue = this.readStoredMuted();
+    this.isMuted = this.storedMutedValue === 'true';
     this.debug = {
       mode: this.isRNWebView ? 'rn-bridge' : 'web-audio',
       contextState: 'none',
       unlocked: false,
+      rms: 0,
+      masterGain: 1,
+      forceMasterGain: false,
+      muted: this.isMuted,
+      storedMuted: this.storedMutedValue,
+      lastBeep: null,
       lastResume: null,
       lastError: null,
     };
@@ -93,6 +108,102 @@ class WebSoundManager implements SoundService {
     }
   }
 
+  private readStoredMuted(): string | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      return window.localStorage.getItem(MUTE_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  }
+
+  private writeStoredMuted(value: boolean) {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(MUTE_STORAGE_KEY, String(value));
+    } catch {
+      // No-op
+    }
+    this.storedMutedValue = this.readStoredMuted();
+    this.updateDebug({
+      muted: this.isMuted,
+      storedMuted: this.storedMutedValue,
+    });
+  }
+
+  private getEffectiveMasterGainValue() {
+    if (this.forceMasterGain) return 1;
+    if (this.isMuted) return 0;
+    return 1;
+  }
+
+  private ensureOutputNodes(ctx: AudioContext) {
+    if (this.masterGainNode && this.analyserNode) return;
+    this.masterGainNode = ctx.createGain();
+    this.masterGainNode.gain.value = this.getEffectiveMasterGainValue();
+    this.analyserNode = ctx.createAnalyser();
+    this.analyserNode.fftSize = 2048;
+    this.masterGainNode.connect(this.analyserNode);
+    this.analyserNode.connect(ctx.destination);
+    this.startRmsMonitor();
+    this.updateDebug({
+      masterGain: this.masterGainNode.gain.value,
+      forceMasterGain: this.forceMasterGain,
+      muted: this.isMuted,
+      storedMuted: this.storedMutedValue,
+    });
+  }
+
+  private updateMasterGainValue() {
+    if (!this.masterGainNode || !this.ctx) {
+      this.updateDebug({
+        masterGain: this.getEffectiveMasterGainValue(),
+        forceMasterGain: this.forceMasterGain,
+        muted: this.isMuted,
+        storedMuted: this.storedMutedValue,
+      });
+      return;
+    }
+    const value = this.getEffectiveMasterGainValue();
+    this.masterGainNode.gain.setValueAtTime(value, this.ctx.currentTime);
+    this.updateDebug({
+      masterGain: value,
+      forceMasterGain: this.forceMasterGain,
+      muted: this.isMuted,
+      storedMuted: this.storedMutedValue,
+    });
+  }
+
+  private connectGainToOutput(gain: GainNode) {
+    if (!this.ctx) return;
+    this.ensureOutputNodes(this.ctx);
+    if (this.masterGainNode) {
+      gain.connect(this.masterGainNode);
+      return;
+    }
+    gain.connect(this.ctx.destination);
+  }
+
+  private startRmsMonitor() {
+    if (typeof window === 'undefined') return;
+    if (this.rmsTimer !== null) return;
+    this.rmsTimer = window.setInterval(() => {
+      if (!this.analyserNode) {
+        this.updateDebug({ rms: 0 });
+        return;
+      }
+      const data = new Float32Array(this.analyserNode.fftSize);
+      this.analyserNode.getFloatTimeDomainData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) {
+        const v = data[i];
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / data.length);
+      this.updateDebug({ rms });
+    }, 140);
+  }
+
   private createAudioContext() {
     if (this.isRNWebView || this.ctx) return this.ctx;
     try {
@@ -102,6 +213,8 @@ class WebSoundManager implements SoundService {
         return null;
       }
       this.ctx = new AudioContextClass({ latencyHint: 'interactive' } as AudioContextOptions);
+      this.ensureOutputNodes(this.ctx);
+      this.updateMasterGainValue();
       this.updateDebug({
         contextState: this.ctx.state,
         lastError: null,
@@ -195,6 +308,70 @@ class WebSoundManager implements SoundService {
     }
   }
 
+  debugBeep() {
+    if (this.isRNWebView) {
+      this.updateDebug({
+        lastBeep: {
+          started: false,
+          stopped: false,
+          at: Date.now(),
+          error: 'rn-bridge mode: web beep disabled',
+        },
+      });
+      return;
+    }
+    const ctx = this.createAudioContext();
+    if (!ctx) return;
+
+    this.resumeContext('debug-beep');
+    try {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1000, ctx.currentTime);
+      gain.gain.setValueAtTime(0.25, ctx.currentTime);
+      osc.connect(gain);
+      // Explicit destination path for evidence test.
+      gain.connect(ctx.destination);
+      osc.onended = () => {
+        this.updateDebug({
+          lastBeep: {
+            started: true,
+            stopped: true,
+            at: Date.now(),
+          },
+          lastError: null,
+        });
+      };
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.3);
+      this.updateDebug({
+        lastBeep: {
+          started: true,
+          stopped: false,
+          at: Date.now(),
+        },
+        lastError: null,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.updateDebug({
+        lastBeep: {
+          started: false,
+          stopped: false,
+          at: Date.now(),
+          error: message,
+        },
+        lastError: `debug beep failed: ${message}`,
+      });
+    }
+  }
+
+  setDebugForceMasterGain(force: boolean) {
+    this.forceMasterGain = force;
+    this.updateMasterGainValue();
+  }
+
   getDebugState() {
     return { ...this.debug };
   }
@@ -285,17 +462,20 @@ class WebSoundManager implements SoundService {
       this.ensureContext();
     }
     this.isMuted = !this.isMuted;
+    this.writeStoredMuted(this.isMuted);
+    this.updateMasterGainValue();
     if (this.isMuted) {
       this.stopBGM();
     } else {
       this.playBGM();
     }
+    this.updateDebug({ muted: this.isMuted });
     return this.isMuted;
   }
 
   playSelect() {
     this.vibrate(10); 
-    if (this.isMuted) return;
+    if (this.isMuted && !this.forceMasterGain) return;
     if (this.isReactNativeWebView()) {
       this.sendNativeSound('select');
       return;
@@ -304,7 +484,7 @@ class WebSoundManager implements SoundService {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      this.connectGainToOutput(gain);
       osc.type = 'sine';
       osc.frequency.setValueAtTime(800, ctx.currentTime);
       osc.frequency.exponentialRampToValueAtTime(1200, ctx.currentTime + 0.1);
@@ -317,7 +497,7 @@ class WebSoundManager implements SoundService {
 
   playMatchSuccess() {
     this.vibrate([10, 30, 10]);
-    if (this.isMuted) return;
+    if (this.isMuted && !this.forceMasterGain) return;
     if (this.isReactNativeWebView()) {
       this.sendNativeSound('match');
       return;
@@ -328,7 +508,7 @@ class WebSoundManager implements SoundService {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      this.connectGainToOutput(gain);
       
       osc.type = 'triangle';
       osc.frequency.value = freq;
@@ -346,7 +526,7 @@ class WebSoundManager implements SoundService {
 
   playStoreSuccess() {
     this.vibrate([50, 50, 100]);
-    if (this.isMuted) return;
+    if (this.isMuted && !this.forceMasterGain) return;
     if (this.isReactNativeWebView()) {
       this.sendNativeSound('store');
       return;
@@ -358,7 +538,7 @@ class WebSoundManager implements SoundService {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.connect(gain);
-        gain.connect(ctx.destination);
+        this.connectGainToOutput(gain);
         osc.type = 'square';
         osc.frequency.setValueAtTime(freq, ctx.currentTime + (i * 0.1));
         
@@ -374,7 +554,7 @@ class WebSoundManager implements SoundService {
 
   playError() {
     this.vibrate([50, 50, 50]);
-    if (this.isMuted) return;
+    if (this.isMuted && !this.forceMasterGain) return;
     if (this.isReactNativeWebView()) {
       this.sendNativeSound('error');
       return;
@@ -383,7 +563,7 @@ class WebSoundManager implements SoundService {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      this.connectGainToOutput(gain);
       osc.type = 'sawtooth';
       osc.frequency.setValueAtTime(150, ctx.currentTime);
       osc.frequency.linearRampToValueAtTime(100, ctx.currentTime + 0.2);
@@ -396,7 +576,7 @@ class WebSoundManager implements SoundService {
 
   playGameOver() {
     this.vibrate([60, 40, 80]);
-    if (this.isMuted) return;
+    if (this.isMuted && !this.forceMasterGain) return;
     if (this.isReactNativeWebView()) {
       this.sendNativeSound('gameover');
       return;
@@ -408,7 +588,7 @@ class WebSoundManager implements SoundService {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      this.connectGainToOutput(gain);
 
       osc.type = 'square';
       const start = now + i * 0.09;
@@ -426,7 +606,7 @@ class WebSoundManager implements SoundService {
 
   playLevelComplete() {
     this.vibrate([20, 30, 20, 30, 50]);
-    if (this.isMuted) return;
+    if (this.isMuted && !this.forceMasterGain) return;
     if (this.isReactNativeWebView()) {
       this.sendNativeSound('levelcomplete');
       return;
@@ -437,7 +617,7 @@ class WebSoundManager implements SoundService {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.connect(gain);
-        gain.connect(ctx.destination);
+        this.connectGainToOutput(gain);
         osc.type = 'sine';
         osc.frequency.value = freq;
         const start = ctx.currentTime + (i * 0.1);
@@ -451,7 +631,7 @@ class WebSoundManager implements SoundService {
 
   playEndingCelebration() {
     this.vibrate([30, 20, 30, 20, 60, 40, 60]);
-    if (this.isMuted) return;
+    if (this.isMuted && !this.forceMasterGain) return;
     if (this.isReactNativeWebView()) {
       this.sendNativeSound('ending');
       return;
@@ -464,7 +644,7 @@ class WebSoundManager implements SoundService {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      this.connectGainToOutput(gain);
       osc.type = 'triangle';
 
       const start = now + i * 0.03;
@@ -482,7 +662,7 @@ class WebSoundManager implements SoundService {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
-      gain.connect(ctx.destination);
+      this.connectGainToOutput(gain);
       osc.type = 'square';
       osc.frequency.setValueAtTime(1800, now + t);
       osc.frequency.exponentialRampToValueAtTime(850, now + t + 0.03);
@@ -495,7 +675,7 @@ class WebSoundManager implements SoundService {
   }
 
   playBGM() {
-    if (this.isMuted || this.isBgmPlaying) return;
+    if ((this.isMuted && !this.forceMasterGain) || this.isBgmPlaying) return;
     if (this.isRNWebView) return;
     this.ensureContext();
     if (!this.ctx) return;

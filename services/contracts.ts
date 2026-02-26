@@ -4,6 +4,17 @@ export type SoundDebugState = {
   mode: 'web-audio' | 'rn-bridge';
   contextState: AudioContextState | 'none';
   unlocked: boolean;
+  rms: number;
+  masterGain: number;
+  forceMasterGain: boolean;
+  muted: boolean;
+  storedMuted: string | null;
+  lastBeep: {
+    started: boolean;
+    stopped: boolean;
+    at: number;
+    error?: string;
+  } | null;
   lastResume: {
     ok: boolean;
     at: number;
@@ -17,6 +28,8 @@ export interface SoundService {
   init: () => void;
   resume: () => void;
   forceUnlockFromUserGesture?: (reason?: string) => void;
+  debugBeep?: () => void;
+  setDebugForceMasterGain?: (force: boolean) => void;
   getDebugState?: () => SoundDebugState;
   toggleMute: () => boolean;
   playSelect: () => void;
