@@ -32,6 +32,25 @@
         border-radius: 12px;
         padding: 24px;
       }
+      .topbar {
+        display: flex;
+        justify-content: flex-start;
+        margin-bottom: 12px;
+      }
+      .back-btn {
+        appearance: none;
+        border: 1px solid #7faecb;
+        background: linear-gradient(180deg, #f7fcff 0%, #dceefa 100%);
+        color: #1f4e7e;
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .back-btn:active {
+        transform: translateY(1px);
+      }
       h1, h2 { margin: 0 0 12px; color: var(--accent); }
       h1 { font-size: 28px; }
       h2 { font-size: 20px; margin-top: 28px; }
@@ -56,6 +75,9 @@
   <body>
     <main class="wrap">
       <section class="card">
+        <div class="topbar">
+          <button class="back-btn" type="button" onclick="goBackToGame()">게임으로 돌아가기</button>
+        </div>
         <h1>댕댕팡 개인정보처리방침</h1>
         <p class="meta">시행일: 2026-02-27</p>
         <p>
@@ -128,5 +150,14 @@
         </p>
       </section>
     </main>
+    <script>
+      function goBackToGame() {
+        if (window.history.length > 1) {
+          window.history.back();
+          return;
+        }
+        window.location.href = '/';
+      }
+    </script>
   </body>
 </html>
